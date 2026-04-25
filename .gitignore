@@ -487,3 +487,11 @@ $RECYCLE.BIN/
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Local scratch / secrets — never commit
+docs/New folder/
+docs/New Text Document.txt
+**/gitpat*.txt
+*.pat
+*.token
+push-to-rvadapally.bat

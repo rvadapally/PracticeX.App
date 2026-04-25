@@ -58,4 +58,3 @@ The database should use a dedicated migration history table with snake_case nami
 Status: accepted
 
 Local folder discovery, Outlook, Gmail, Drive/SharePoint, Zoom transcripts, and SFTP all feed the same ingestion model. Each connector produces source objects and candidate documents. Human review decides what becomes canonical contract data.
-

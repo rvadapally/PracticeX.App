@@ -1,0 +1,32 @@
+
+Agreed. For the demo, I’d include:
+
+Local folder discovery
+One real mailbox connector
+My recommendation: Outlook first if your company uses Microsoft 365. Otherwise, Gmail. I would not choose Zoom as the first live connector for this demo because transcripts depend on meeting recording/transcription settings and consent, which adds risk. We can still demo Zoom by importing exported Zoom transcripts through the folder crawler.
+
+For the mailbox connector, keep the demo scope tight and enterprise-correct:
+
+OAuth sign-in.
+Read-only mailbox access.
+Search/filter emails likely to contain contracts.
+Pull attachment metadata first.
+Show candidate documents before importing.
+Import only selected attachments.
+Every discovered item becomes a source_object.
+Every import creates an ingestion_batch and ingestion_job.
+Nothing silently becomes a contract.
+The demo story becomes very strong:
+
+“PracticeX can look at a messy local folder and a real mailbox, find likely contract evidence, deduplicate it, classify it, and push selected documents into the same governed review pipeline.”
+
+For search heuristics, the mailbox connector can look for:
+
+Attachments with .pdf, .docx, .doc, .xlsx
+Subjects containing contract, agreement, amendment, renewal, fee schedule, lease, MSA, BAA, SOW
+Senders/domains from payers, vendors, counsel, landlords
+Recent date range filter
+Optional folder scope, like Inbox, Legal, Contracts, Vendors
+For this week’s demo, I’d build the connector as candidate discovery, not full ingestion automation. That is still enterprise-ready because the source model, audit trail, and ingestion pipeline are real. We simply keep the first connector behavior conservative.
+
+My vote: folder crawler + Outlook mailbox connector. If you use Gmail day to day, switch Outlook to Gmail, but I’d avoid Zoom as the first live connector.
