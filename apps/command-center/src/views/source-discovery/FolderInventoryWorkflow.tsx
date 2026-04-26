@@ -171,6 +171,7 @@ export function FolderInventoryWorkflow({ connectionId, onClose, onComplete }: P
           <PruneStep
             manifest={manifest}
             selectedIds={selectedIds}
+            setSelectedIds={setSelectedIds}
             toggle={toggle}
           />
         )}
@@ -322,10 +323,12 @@ function SelectStep({
 function PruneStep({
   manifest,
   selectedIds,
+  setSelectedIds,
   toggle,
 }: {
   manifest: ManifestScanResponse;
   selectedIds: Set<string>;
+  setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   toggle: (id: string, allowed: boolean) => void;
 }) {
   const grouped = useMemo(() => {
@@ -339,6 +342,33 @@ function PruneStep({
     ? Math.round((manifest.skippedCount / manifest.totalItems) * 100)
     : 0;
 
+  const eligibleIds = useMemo(
+    () => manifest.items.filter((i) => i.band !== 'skipped').map((i) => i.manifestItemId),
+    [manifest],
+  );
+  const strongLikelyIds = useMemo(
+    () => manifest.items.filter((i) => i.band === 'strong' || i.band === 'likely').map((i) => i.manifestItemId),
+    [manifest],
+  );
+
+  const selectAllEligible = useCallback(() => setSelectedIds(new Set(eligibleIds)), [eligibleIds, setSelectedIds]);
+  const selectStrongLikely = useCallback(() => setSelectedIds(new Set(strongLikelyIds)), [strongLikelyIds, setSelectedIds]);
+  const clearAll = useCallback(() => setSelectedIds(new Set()), [setSelectedIds]);
+
+  const setBand = useCallback(
+    (band: 'strong' | 'likely' | 'possible' | 'skipped', selected: boolean) => {
+      if (band === 'skipped') return;
+      const ids = grouped[band].map((i) => i.manifestItemId);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (selected) ids.forEach((id) => next.add(id));
+        else ids.forEach((id) => next.delete(id));
+        return next;
+      });
+    },
+    [grouped, setSelectedIds],
+  );
+
   return (
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginTop: 4 }}>
@@ -348,15 +378,74 @@ function PruneStep({
         <KpiCard label="Skipped" value={manifest.skippedCount} helper={`${avoidedPct}% avoided`} tone="warn" />
       </div>
 
-      <div style={{ marginTop: 16, maxHeight: '46vh', overflowY: 'auto', borderTop: '1px solid var(--px-line-2)' }}>
+      <div
+        style={{
+          alignItems: 'center',
+          background: 'var(--px-surface-2)',
+          border: '1px solid var(--px-line)',
+          borderRadius: 'var(--px-radius)',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 8,
+          justifyContent: 'space-between',
+          marginTop: 12,
+          padding: '8px 12px',
+        }}
+      >
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <button type="button" className="px-button ghost" onClick={selectStrongLikely} style={pillStyle}>
+            Strong + Likely ({strongLikelyIds.length})
+          </button>
+          <button type="button" className="px-button ghost" onClick={selectAllEligible} style={pillStyle}>
+            All eligible ({eligibleIds.length})
+          </button>
+          <button type="button" className="px-button ghost" onClick={clearAll} style={pillStyle}>
+            Clear
+          </button>
+        </div>
+        <div className="mono-label">
+          {selectedIds.size} of {eligibleIds.length} selected
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, maxHeight: '46vh', overflowY: 'auto', borderTop: '1px solid var(--px-line-2)' }}>
         {(['strong', 'likely', 'possible', 'skipped'] as const).map((band) => {
           const list = grouped[band];
           if (!list || list.length === 0) return null;
           const allowed = band !== 'skipped';
+          const selectedInBand = list.filter((i) => selectedIds.has(i.manifestItemId)).length;
+          const allSelectedInBand = allowed && selectedInBand === list.length && list.length > 0;
+          const someSelectedInBand = allowed && selectedInBand > 0 && selectedInBand < list.length;
           return (
             <div key={band} style={{ marginTop: 12 }}>
-              <div className="mono-label" style={{ marginBottom: 6 }}>
-                {labelForBand(band)} · {list.length}
+              <div
+                style={{
+                  alignItems: 'center',
+                  display: 'flex',
+                  gap: 10,
+                  justifyContent: 'space-between',
+                  marginBottom: 6,
+                }}
+              >
+                <div className="mono-label">
+                  {labelForBand(band)} · {list.length}
+                  {allowed ? ` · ${selectedInBand} selected` : ''}
+                </div>
+                {allowed ? (
+                  <button
+                    type="button"
+                    className="px-button ghost"
+                    onClick={() => setBand(band, !allSelectedInBand)}
+                    style={pillStyle}
+                    aria-pressed={allSelectedInBand}
+                  >
+                    {allSelectedInBand
+                      ? 'Deselect all in band'
+                      : someSelectedInBand
+                        ? `Select remaining (${list.length - selectedInBand})`
+                        : `Select all in band (${list.length})`}
+                  </button>
+                ) : null}
               </div>
               {list.map((item) => {
                 const checked = selectedIds.has(item.manifestItemId);
@@ -527,6 +616,18 @@ const busyStyle: React.CSSProperties = {
   gap: 8,
   padding: 24,
   textAlign: 'center',
+};
+
+const pillStyle: React.CSSProperties = {
+  background: 'var(--px-surface)',
+  border: '1px solid var(--px-line)',
+  borderRadius: 'var(--px-radius)',
+  cursor: 'pointer',
+  fontFamily: 'var(--px-mono, monospace)',
+  fontSize: 11.5,
+  letterSpacing: '0.04em',
+  padding: '4px 10px',
+  textTransform: 'uppercase',
 };
 
 const footerStyle: React.CSSProperties = {
