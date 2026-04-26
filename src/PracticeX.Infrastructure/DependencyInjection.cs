@@ -60,6 +60,8 @@ public static class DependencyInjection
             sp.GetRequiredService<DocxTextExtractor>()
         }));
         services.AddSingleton<IContractFieldExtractor, EmploymentExtractor>();
+        services.AddSingleton<IContractFieldExtractor, NdaExtractor>();
+        services.AddSingleton<IContractFieldExtractor, CorporateExtractor>();
         services.AddSingleton<IDocumentDiscoveryPipeline, DefaultDocumentDiscoveryPipeline>();
         services.AddSingleton<PdfComplexityProfiler>();
         services.AddSingleton<ExcelComplexityProfiler>();
