@@ -94,32 +94,52 @@ export function SourceDiscoveryPage() {
   );
 
   const [folderConnId, setFolderConnId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: 'warn' | 'error'; text: string } | null>(null);
+
   const openFolderWorkflow = useCallback(async () => {
-    const conn = await ensureConnection('local_folder', 'Local folder upload');
-    setFolderConnId(conn.id);
-    setUploadOpen(true);
+    setNotice(null);
+    try {
+      const conn = await ensureConnection('local_folder', 'Local folder upload');
+      setFolderConnId(conn.id);
+      setUploadOpen(true);
+    } catch (err) {
+      const detail = (err as { detail?: string; title?: string }).detail
+        ?? (err as { title?: string }).title
+        ?? 'Could not initialise the folder connection. Check the API is running on https://localhost:7100.';
+      setNotice({ tone: 'error', text: detail });
+    }
   }, [ensureConnection]);
 
+  const outlookNotConfigured = outlookConnector?.status === 'configuration_required';
+
   const handleConnectOutlook = useCallback(async () => {
+    setNotice(null);
+    if (outlookNotConfigured) {
+      setNotice({
+        tone: 'warn',
+        text: 'Outlook is not configured yet. Set MicrosoftGraph__ClientId, MicrosoftGraph__ClientSecret, and MicrosoftGraph__TenantId on the API host (see docs/source-discovery.md).',
+      });
+      return;
+    }
     setActionInflight('outlook_connect');
     try {
       const conn = await ensureConnection('outlook_mailbox', 'Outlook mailbox');
       const startResponse = await sourcesApi.startOutlookOAuth(conn.id);
       window.location.href = startResponse.authorizeUrl;
     } catch (err) {
-      const detail =
-        (err as { detail?: string }).detail ??
-        'Microsoft Graph is not configured yet. Set MicrosoftGraph__ClientId and MicrosoftGraph__ClientSecret on the API host.';
-      window.alert(detail);
+      const detail = (err as { detail?: string }).detail
+        ?? 'Microsoft Graph is not configured yet. Set MicrosoftGraph__ClientId and MicrosoftGraph__ClientSecret on the API host.';
+      setNotice({ tone: 'warn', text: detail });
     } finally {
       setActionInflight(null);
     }
-  }, [ensureConnection]);
+  }, [ensureConnection, outlookNotConfigured]);
 
   const handleScanOutlook = useCallback(async () => {
     if (!outlookConnection || outlookConnection.status !== 'connected') {
       return;
     }
+    setNotice(null);
     setActionInflight('outlook_scan');
     try {
       const summary = await sourcesApi.scanOutlook(outlookConnection.id, 25);
@@ -127,7 +147,7 @@ export function SourceDiscoveryPage() {
       await refresh();
     } catch (err) {
       const detail = (err as { detail?: string }).detail ?? 'Scan failed.';
-      window.alert(detail);
+      setNotice({ tone: 'error', text: detail });
     } finally {
       setActionInflight(null);
     }
@@ -218,6 +238,36 @@ export function SourceDiscoveryPage() {
         </div>
       ) : null}
 
+      {notice ? (
+        <div
+          role="status"
+          style={{
+            alignItems: 'center',
+            background: notice.tone === 'error' ? 'var(--px-orange-soft)' : 'var(--px-surface-2)',
+            border: `1px solid ${notice.tone === 'error' ? 'var(--px-orange)' : 'var(--px-line)'}`,
+            borderRadius: 'var(--px-radius)',
+            color: notice.tone === 'error' ? 'var(--px-orange)' : 'var(--px-text)',
+            display: 'flex',
+            fontSize: 13,
+            gap: 12,
+            justifyContent: 'space-between',
+            marginBottom: 18,
+            padding: '10px 14px',
+          }}
+        >
+          <span>{notice.text}</span>
+          <button
+            type="button"
+            className="px-button ghost"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss"
+            style={{ fontSize: 12 }}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       <section className="kpi-grid">
         <KpiCard label="Files discovered" value={totals.files} helper="Across recent batches" />
         <KpiCard label="Candidates" value={totals.candidates} helper="Open for selection" tone="accent" />
@@ -238,7 +288,7 @@ export function SourceDiscoveryPage() {
               connection={folderConnection ?? null}
               status="ready"
               actions={
-                <Button onClick={() => setUploadOpen(true)}>
+                <Button onClick={() => void openFolderWorkflow()}>
                   <FolderUp size={14} /> Upload folder
                 </Button>
               }
@@ -263,8 +313,13 @@ export function SourceDiscoveryPage() {
                     Scan inbox
                   </Button>
                 ) : (
-                  <Button onClick={handleConnectOutlook} disabled={actionInflight === 'outlook_connect'}>
-                    <PlugZap size={14} /> Connect Outlook
+                  <Button
+                    onClick={handleConnectOutlook}
+                    disabled={actionInflight === 'outlook_connect' || outlookNotConfigured}
+                    title={outlookNotConfigured ? 'Microsoft Graph credentials not configured on the API host' : undefined}
+                  >
+                    <PlugZap size={14} />
+                    {outlookNotConfigured ? 'Configuration required' : 'Connect Outlook'}
                   </Button>
                 )
               }
