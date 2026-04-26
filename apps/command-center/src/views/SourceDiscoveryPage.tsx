@@ -8,6 +8,7 @@ import {
   PlugZap,
   RefreshCcw,
   ShieldCheck,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -134,6 +135,40 @@ export function SourceDiscoveryPage() {
       setActionInflight(null);
     }
   }, [ensureConnection, outlookNotConfigured]);
+
+  const handleDeleteBatch = useCallback(
+    async (batchId: string) => {
+      if (!window.confirm('Delete this batch and its candidates? Audit events stay; source files on disk are kept.')) return;
+      setActionInflight(`delete_batch_${batchId}`);
+      try {
+        await sourcesApi.deleteBatch(batchId);
+        if (activeBatch?.batchId === batchId) setActiveBatch(null);
+        await refresh();
+      } catch (err) {
+        const detail = (err as { detail?: string }).detail ?? 'Delete failed.';
+        setNotice({ tone: 'error', text: detail });
+      } finally {
+        setActionInflight(null);
+      }
+    },
+    [activeBatch, refresh],
+  );
+
+  const handleDeleteAllBatches = useCallback(async () => {
+    if (!window.confirm('Delete ALL ingestion batches and their candidates? Audit events stay.')) return;
+    setActionInflight('delete_all_batches');
+    try {
+      const r = await sourcesApi.deleteAllBatches();
+      setActiveBatch(null);
+      setNotice({ tone: 'warn', text: `Deleted ${r.deletedCount} batch${r.deletedCount === 1 ? '' : 'es'}.` });
+      await refresh();
+    } catch (err) {
+      const detail = (err as { detail?: string }).detail ?? 'Bulk delete failed.';
+      setNotice({ tone: 'error', text: detail });
+    } finally {
+      setActionInflight(null);
+    }
+  }, [refresh]);
 
   const handleScanOutlook = useCallback(async () => {
     if (!outlookConnection || outlookConnection.status !== 'connected') {
@@ -338,9 +373,19 @@ export function SourceDiscoveryPage() {
           eyebrow={`${state.batches.length} runs`}
           actions={
             state.batches.length > 0 ? (
-              <Button variant="ghost" onClick={() => void refresh()}>
-                <RefreshCcw size={13} />
-              </Button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Button
+                  variant="ghost"
+                  onClick={() => void handleDeleteAllBatches()}
+                  disabled={actionInflight === 'delete_all_batches'}
+                  title="Delete all batches"
+                >
+                  <Trash2 size={13} />
+                </Button>
+                <Button variant="ghost" onClick={() => void refresh()}>
+                  <RefreshCcw size={13} />
+                </Button>
+              </div>
             ) : null
           }
         >
@@ -360,7 +405,7 @@ export function SourceDiscoveryPage() {
                     {new Date(batch.createdAt).toLocaleString()} · {batch.fileCount} files
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <div style={{ alignItems: 'center', display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                   <StatusChip tone={batch.candidateCount > 0 ? 'ok' : 'muted'}>
                     {batch.candidateCount} candidates
                   </StatusChip>
@@ -370,6 +415,16 @@ export function SourceDiscoveryPage() {
                   {batch.errorCount > 0 ? (
                     <StatusChip tone="accent">{batch.errorCount} errors</StatusChip>
                   ) : null}
+                  <button
+                    type="button"
+                    className="px-icon-button"
+                    aria-label="Delete batch"
+                    title="Delete batch"
+                    onClick={() => void handleDeleteBatch(batch.id)}
+                    disabled={actionInflight === `delete_batch_${batch.id}`}
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
               </div>
             ))

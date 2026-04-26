@@ -76,6 +76,8 @@ public sealed record IngestionBatchSummaryDto(
 
 public sealed record OutlookOAuthStartResponse(string AuthorizeUrl, string State);
 
+public sealed record DeleteAllBatchesResult(int DeletedCount);
+
 public sealed record OutlookScanRequest(int? Top, DateTimeOffset? Since);
 
 public sealed record ManifestItemDto(

@@ -212,6 +212,10 @@ export const sourcesApi = {
     }),
 
   listBatches: (limit = 20) => request<IngestionBatch[]>(`/sources/batches?limit=${limit}`),
+  deleteBatch: (batchId: string) =>
+    request<void>(`/sources/batches/${batchId}`, { method: 'DELETE' }),
+  deleteAllBatches: () =>
+    request<{ deletedCount: number }>(`/sources/batches`, { method: 'DELETE' }),
   listCandidates: (params: { status?: string; batchId?: string; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (params.status) q.append('status', params.status);

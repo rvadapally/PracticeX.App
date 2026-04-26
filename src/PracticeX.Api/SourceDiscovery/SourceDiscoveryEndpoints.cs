@@ -44,6 +44,8 @@ public static class SourceDiscoveryEndpoints
 
         group.MapGet("/batches", ListBatches);
         group.MapGet("/batches/{batchId:guid}", GetBatch);
+        group.MapDelete("/batches/{batchId:guid}", DeleteBatch);
+        group.MapDelete("/batches", DeleteAllBatches);
         group.MapGet("/candidates", ListCandidates);
         group.MapPost("/candidates/{candidateId:guid}/queue-review", QueueCandidateReview);
         group.MapPost("/candidates/{candidateId:guid}/retry", RetryCandidate);
@@ -733,6 +735,104 @@ public static class SourceDiscoveryEndpoints
             b.Id, b.SourceType, b.SourceConnectionId, b.Status,
             b.FileCount, b.CandidateCount, b.SkippedCount, b.ErrorCount,
             b.CreatedAt, b.CompletedAt, b.Notes));
+    }
+
+    private static async Task<Results<NoContent, NotFound>> DeleteBatch(
+        Guid batchId,
+        PracticeXDbContext db,
+        ICurrentUserContext userContext,
+        CancellationToken cancellationToken)
+    {
+        var batch = await db.IngestionBatches.FirstOrDefaultAsync(
+            x => x.Id == batchId && x.TenantId == userContext.TenantId, cancellationToken);
+        if (batch is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        await CascadeDeleteBatchAsync(db, batchId, userContext.TenantId, userContext.UserId, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return TypedResults.NoContent();
+    }
+
+    private static async Task<Ok<DeleteAllBatchesResult>> DeleteAllBatches(
+        PracticeXDbContext db,
+        ICurrentUserContext userContext,
+        CancellationToken cancellationToken)
+    {
+        var batchIds = await db.IngestionBatches
+            .Where(x => x.TenantId == userContext.TenantId)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var id in batchIds)
+        {
+            await CascadeDeleteBatchAsync(db, id, userContext.TenantId, userContext.UserId, cancellationToken);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return TypedResults.Ok(new DeleteAllBatchesResult(batchIds.Count));
+    }
+
+    private static async Task CascadeDeleteBatchAsync(
+        PracticeXDbContext db,
+        Guid batchId,
+        Guid tenantId,
+        Guid actorUserId,
+        CancellationToken cancellationToken)
+    {
+        // Drop in dependency order. document_assets and source_objects can be
+        // shared across batches via per-tenant SHA dedupe, so we leave them in
+        // place — only batch-scoped rows are removed. Audit events are
+        // immutable and stay.
+        var jobs = await db.IngestionJobs
+            .Where(j => j.BatchId == batchId && j.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        var sourceObjectIds = jobs.Select(j => j.SourceObjectId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+        var assetIds = jobs.Select(j => j.DocumentAssetId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+
+        // Delete document_candidates whose source_object was created by jobs in this batch.
+        var candidates = await db.DocumentCandidates
+            .Where(c => c.TenantId == tenantId
+                && (sourceObjectIds.Contains(c.SourceObjectId!.Value) || assetIds.Contains(c.DocumentAssetId)))
+            .ToListAsync(cancellationToken);
+        if (candidates.Count > 0)
+        {
+            // Drop their review tasks first
+            var candidateIds = candidates.Select(c => c.Id).ToList();
+            var reviewTasks = await db.ReviewTasks
+                .Where(r => r.TenantId == tenantId && r.ResourceType == "document_candidate" && candidateIds.Contains(r.ResourceId))
+                .ToListAsync(cancellationToken);
+            if (reviewTasks.Count > 0) db.ReviewTasks.RemoveRange(reviewTasks);
+            db.DocumentCandidates.RemoveRange(candidates);
+        }
+
+        db.IngestionJobs.RemoveRange(jobs);
+
+        var batch = await db.IngestionBatches.FirstOrDefaultAsync(b => b.Id == batchId, cancellationToken);
+        if (batch is not null)
+        {
+            db.AuditEvents.Add(new PracticeX.Domain.Audit.AuditEvent
+            {
+                TenantId = tenantId,
+                ActorType = "user",
+                ActorId = actorUserId,
+                EventType = "ingestion.batch.deleted",
+                ResourceType = "ingestion_batch",
+                ResourceId = batchId,
+                MetadataJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    sourceType = batch.SourceType,
+                    fileCount = batch.FileCount,
+                    candidateCount = batch.CandidateCount,
+                    phase = batch.Phase,
+                    deletedJobs = jobs.Count,
+                    deletedCandidates = candidates.Count
+                }),
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            db.IngestionBatches.Remove(batch);
+        }
     }
 
     private static async Task<Ok<IReadOnlyCollection<DocumentCandidateDto>>> ListCandidates(
