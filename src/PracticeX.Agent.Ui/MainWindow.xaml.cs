@@ -189,20 +189,21 @@ public partial class MainWindow : Window
 
     // ---- Upload --------------------------------------------------------------
 
-    private async void OnUpload(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Step 1 of upload: open the Prepare-upload modal so the user reviews
+    /// what they're about to send (file count, total size, band breakdown,
+    /// optional notes) before bytes leave the building.
+    /// </summary>
+    private void OnUpload(object sender, RoutedEventArgs e)
     {
-        if (_manifestBatchId is null || _scanRoot is null)
+        if (_manifestBatchId is null)
         {
             SetStatus("Run a scan first.", isError: true);
             return;
         }
-        if (ConnectionCombo.SelectedItem is not ConnectionOption conn)
+        if (ConnectionCombo.SelectedItem is not ConnectionOption)
         {
             SetStatus("Pick a connection first.", isError: true);
-            return;
-        }
-        if (!Uri.TryCreate(ApiBox.Text, UriKind.Absolute, out var apiUri))
-        {
             return;
         }
 
@@ -213,7 +214,44 @@ public partial class MainWindow : Window
             return;
         }
 
+        OpenUploadPreview(selected);
+    }
+
+    private void OnCancelUpload(object sender, RoutedEventArgs e) =>
+        UploadPreviewModal.Visibility = Visibility.Collapsed;
+
+    /// <summary>
+    /// Step 2 of upload: user confirmed in the modal — actually POST the bundle.
+    /// </summary>
+    private async void OnConfirmUpload(object sender, RoutedEventArgs e)
+    {
+        if (_manifestBatchId is null || _scanRoot is null)
+        {
+            UploadPreviewModal.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (ConnectionCombo.SelectedItem is not ConnectionOption conn)
+        {
+            UploadPreviewModal.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (!Uri.TryCreate(ApiBox.Text, UriKind.Absolute, out var apiUri))
+        {
+            UploadPreviewModal.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var selected = Rows.Where(r => r.IsSelected && r.Band != ManifestBandNames.Skipped).ToList();
+        if (selected.Count == 0)
+        {
+            UploadPreviewModal.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         var bundleFiles = MapBundle(selected);
+        var notes = string.IsNullOrWhiteSpace(PreviewNotesBox.Text) ? null : PreviewNotesBox.Text.Trim();
+
+        UploadPreviewModal.Visibility = Visibility.Collapsed;
         UploadBtn.IsEnabled = false;
         ScanBtn.IsEnabled = false;
         ShowProgress(
@@ -224,9 +262,11 @@ public partial class MainWindow : Window
         try
         {
             using var client = new PracticeXClient(apiUri, conn.Id, Token, Insecure);
-            var summary = await client.PostBundleAsync(_manifestBatchId.Value, bundleFiles, notes: null, default);
+            var summary = await client.PostBundleAsync(_manifestBatchId.Value, bundleFiles, notes, default);
 
             HideProgress();
+            BackfillTiers(summary);
+            ShowComplexityPanel(summary.Complexity);
             ShowSuccessPanel(summary, selected.Count, apiUri);
 
             // Once uploaded, the manifest batch is complete and can't accept more files.
@@ -243,6 +283,109 @@ public partial class MainWindow : Window
             ScanBtn.IsEnabled = true;
             UpdateSelectionLabel();
         }
+    }
+
+    /// <summary>
+    /// Pulls per-file complexity tiers off the bundle response and stamps them
+    /// onto the corresponding manifest rows so the Tier column lights up.
+    /// Match key is ManifestItemId (cloud preserves it through the round-trip).
+    /// </summary>
+    private void BackfillTiers(IngestionBatchSummaryDto summary)
+    {
+        var tierByName = summary.Items
+            .Where(i => !string.IsNullOrEmpty(i.ComplexityTier))
+            .GroupBy(i => (i.RelativePath ?? i.Name))
+            .ToDictionary(g => g.Key, g => g.First().ComplexityTier);
+
+        foreach (var row in Rows)
+        {
+            if (tierByName.TryGetValue(row.RelativePath, out var tier))
+            {
+                row.ComplexityTier = tier;
+            }
+        }
+    }
+
+    private void OpenUploadPreview(IReadOnlyList<ScoredRowVm> selected)
+    {
+        var totalBytes = selected.Sum(r => GetItemSize(r.RelativePath));
+        var byBand = selected.GroupBy(r => r.Band).ToDictionary(g => g.Key, g => g.Count());
+        var bandText = string.Join("  ·  ", new[]
+            {
+                ($"{byBand.GetValueOrDefault(ManifestBandNames.Strong)} Strong"),
+                ($"{byBand.GetValueOrDefault(ManifestBandNames.Likely)} Likely"),
+                ($"{byBand.GetValueOrDefault(ManifestBandNames.Possible)} Possible")
+            });
+
+        PreviewSubtitle.Text =
+            $"You're about to send these files to PracticeX. Per-file complexity profiling " +
+            "(page count, sheet count, formulas, macros, etc.) runs server-side after they land. " +
+            "Use Notes to attach a label that shows up on the batch row.";
+
+        PreviewFileCount.Text = selected.Count.ToString("N0");
+        PreviewTotalSize.Text = FormatBytes(totalBytes);
+        PreviewBands.Text = bandText;
+
+        // Show first 50 file paths to keep the modal scannable.
+        PreviewFileList.ItemsSource = selected
+            .Select(r => r.RelativePath)
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .Concat(selected.Count > 50 ? new[] { $"... +{selected.Count - 50:N0} more" } : Array.Empty<string>())
+            .ToList();
+
+        PreviewDisclaimer.Text =
+            "Estimate only. Placeholder rates for sizing — final pricing per signed engagement.";
+
+        PreviewNotesBox.Text = string.Empty;
+        UploadPreviewModal.Visibility = Visibility.Visible;
+    }
+
+    private long GetItemSize(string relativePath)
+    {
+        return _manifestItems
+            .Where(i => i.RelativePath == relativePath)
+            .Select(i => i.SizeBytes)
+            .FirstOrDefault();
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        const double kib = 1024;
+        const double mib = kib * 1024;
+        const double gib = mib * 1024;
+        return bytes switch
+        {
+            >= (long)gib => $"{bytes / gib:0.0} GB",
+            >= (long)mib => $"{bytes / mib:0.0} MB",
+            >= (long)kib => $"{bytes / kib:0.0} KB",
+            _ => $"{bytes} B"
+        };
+    }
+
+    private void ShowComplexityPanel(BatchComplexityProfileDto? complexity)
+    {
+        if (complexity is null)
+        {
+            ComplexityPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SimpleText.Text = complexity.SimpleCount.ToString("N0");
+        ModerateText.Text = complexity.ModerateCount.ToString("N0");
+        LargeText.Text = complexity.LargeCount.ToString("N0");
+        ExtraText.Text = complexity.ExtraCount.ToString("N0");
+        EstHoursText.Text = complexity.TotalEstimatedHours is { } h ? $"{h:0.0}" : "—";
+        EstCostText.Text = complexity.EstimatedDocumentIntelligenceCostUsd is { } c
+            ? $"${c:0.00}"
+            : "—";
+
+        BlockerText.Text = complexity.Blockers.Count == 0
+            ? string.Empty
+            : "Blockers: " + string.Join("  ·  ",
+                complexity.Blockers.Select(b => $"{b.Count} {b.Code.Replace('_', ' ')}"));
+
+        ComplexityPanel.Visibility = Visibility.Visible;
     }
 
     private List<BundleFile> MapBundle(IEnumerable<ScoredRowVm> rows)
@@ -385,6 +528,14 @@ public partial class MainWindow : Window
         SkippedText.Text = "0";
         SelectionText.Text = "0 selected";
         FilterCountText.Text = string.Empty;
+        ComplexityPanel.Visibility = Visibility.Collapsed;
+        SimpleText.Text = "0";
+        ModerateText.Text = "0";
+        LargeText.Text = "0";
+        ExtraText.Text = "0";
+        EstHoursText.Text = "0.0";
+        EstCostText.Text = "$0.00";
+        BlockerText.Text = string.Empty;
     }
 
     private void SetStatus(string message, bool isError = false)
@@ -415,6 +566,7 @@ public sealed class ConnectionOption
 public sealed class ScoredRowVm : INotifyPropertyChanged
 {
     private bool _isSelected;
+    private string? _complexityTier;
 
     public ScoredRowVm(ManifestScoredItemDto item)
     {
@@ -435,6 +587,25 @@ public sealed class ScoredRowVm : INotifyPropertyChanged
     public decimal Confidence { get; }
     public string ConfidenceDisplay => Confidence.ToString("0.00");
     public string ReasonsDisplay { get; }
+
+    /// <summary>
+    /// Per-file complexity tier ('S','M','L','X'). Null at manifest time
+    /// (no bytes); populated post-bundle from the IngestionItemDto returned
+    /// by /folder/bundles, matched back by ManifestItemId.
+    /// </summary>
+    public string? ComplexityTier
+    {
+        get => _complexityTier;
+        set
+        {
+            if (_complexityTier == value) return;
+            _complexityTier = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ComplexityTier)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TierDisplay)));
+        }
+    }
+
+    public string TierDisplay => _complexityTier ?? "";
 
     public bool IsSelected
     {

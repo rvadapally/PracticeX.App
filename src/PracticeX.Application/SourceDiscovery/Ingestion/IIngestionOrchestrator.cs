@@ -1,4 +1,5 @@
 using PracticeX.Application.Common;
+using PracticeX.Application.SourceDiscovery.Complexity;
 using PracticeX.Application.SourceDiscovery.Connectors;
 
 namespace PracticeX.Application.SourceDiscovery.Ingestion;
@@ -58,6 +59,7 @@ public sealed class IngestionBatchSummary
     public required int ErrorCount { get; init; }
     public required string Status { get; init; }
     public required IReadOnlyList<IngestionItemSummary> Items { get; init; }
+    public BatchComplexityProfile? Complexity { get; init; }
 }
 
 public sealed class IngestionItemSummary
@@ -71,6 +73,10 @@ public sealed class IngestionItemSummary
     public required IReadOnlyList<string> ReasonCodes { get; init; }
     public required string Status { get; init; }
     public string? RelativePath { get; init; }
+    public string? ComplexityTier { get; init; }
+    public IReadOnlyList<string>? ComplexityFactors { get; init; }
+    public IReadOnlyList<string>? ComplexityBlockers { get; init; }
+    public decimal? EstimatedComplexityHours { get; init; }
 }
 
 public sealed class ManifestItem

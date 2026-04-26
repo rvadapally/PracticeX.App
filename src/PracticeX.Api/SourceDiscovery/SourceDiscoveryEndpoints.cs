@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PracticeX.Application.Common;
+using PracticeX.Application.SourceDiscovery.Complexity;
 using PracticeX.Application.SourceDiscovery.Connectors;
 using PracticeX.Application.SourceDiscovery.Ingestion;
 using PracticeX.Application.SourceDiscovery.Outlook;
@@ -275,7 +276,8 @@ public static class SourceDiscoveryEndpoints
                 SkippedCount: summary.SkippedCount,
                 ErrorCount: summary.ErrorCount,
                 Status: summary.Status,
-                Items: summary.Items.Select(MapItem).ToList()));
+                Items: summary.Items.Select(MapItem).ToList(),
+                Complexity: MapComplexity(summary.Complexity)));
         }
         finally
         {
@@ -498,7 +500,8 @@ public static class SourceDiscoveryEndpoints
                 SkippedCount: summary.SkippedCount,
                 ErrorCount: summary.ErrorCount,
                 Status: summary.Status,
-                Items: summary.Items.Select(MapItem).ToList()));
+                Items: summary.Items.Select(MapItem).ToList(),
+                Complexity: MapComplexity(summary.Complexity)));
         }
         finally
         {
@@ -691,7 +694,8 @@ public static class SourceDiscoveryEndpoints
             SkippedCount: summary.SkippedCount,
             ErrorCount: summary.ErrorCount,
             Status: summary.Status,
-            Items: summary.Items.Select(MapItem).ToList()));
+            Items: summary.Items.Select(MapItem).ToList(),
+            Complexity: MapComplexity(summary.Complexity)));
     }
 
     private static async Task<Ok<IReadOnlyCollection<IngestionBatchDto>>> ListBatches(
@@ -968,7 +972,27 @@ public static class SourceDiscoveryEndpoints
         i.Confidence,
         i.ReasonCodes,
         i.Status,
-        i.RelativePath);
+        i.RelativePath,
+        ComplexityTier: i.ComplexityTier,
+        ComplexityFactors: i.ComplexityFactors,
+        ComplexityBlockers: i.ComplexityBlockers,
+        EstimatedComplexityHours: i.EstimatedComplexityHours);
+
+    private static BatchComplexityProfileDto? MapComplexity(BatchComplexityProfile? c)
+    {
+        if (c is null) return null;
+        return new BatchComplexityProfileDto(
+            SimpleCount: c.SimpleCount,
+            ModerateCount: c.ModerateCount,
+            LargeCount: c.LargeCount,
+            ExtraCount: c.ExtraCount,
+            TotalEstimatedHours: c.TotalEstimatedHours,
+            EstimatedDocumentIntelligencePages: c.EstimatedDocumentIntelligencePages,
+            EstimatedDocumentIntelligenceCostUsd: c.EstimatedDocumentIntelligenceCostUsd,
+            Blockers: c.Blockers
+                .Select(b => new BlockerSummaryDto(b.Code, b.Count))
+                .ToList());
+    }
 
     private static string ResolveRedirectUri(MicrosoftGraphOptions options)
     {

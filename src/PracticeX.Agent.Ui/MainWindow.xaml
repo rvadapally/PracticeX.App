@@ -3,214 +3,345 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:PracticeX.Agent.Ui"
         Title="PracticeX Facility Discovery Agent"
-        Height="860" Width="1280"
+        Height="900" Width="1320"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource BgBrush}"
         Foreground="{StaticResource TextBrush}"
         FontFamily="Segoe UI"
         FontSize="14">
-  <Grid Margin="20">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />  <!-- Title -->
-      <RowDefinition Height="Auto" />  <!-- Connection / API row -->
-      <RowDefinition Height="Auto" />  <!-- Folder row -->
-      <RowDefinition Height="Auto" />  <!-- Bands KPI row -->
-      <RowDefinition Height="Auto" />  <!-- Progress bar (collapses when idle) -->
-      <RowDefinition Height="Auto" />  <!-- Filter chips row -->
-      <RowDefinition Height="*" />    <!-- DataGrid -->
-      <RowDefinition Height="Auto" />  <!-- Selection / upload bar -->
-      <RowDefinition Height="Auto" />  <!-- Post-upload success panel (collapses when idle) -->
-      <RowDefinition Height="Auto" />  <!-- Status -->
-    </Grid.RowDefinitions>
+  <!-- Outer grid hosts the main UI plus the modal Prepare-upload overlay. -->
+  <Grid>
+    <!-- Main UI -->
+    <Grid Margin="20">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />  <!-- 0 Title -->
+        <RowDefinition Height="Auto" />  <!-- 1 Connection / API row -->
+        <RowDefinition Height="Auto" />  <!-- 2 Folder row -->
+        <RowDefinition Height="Auto" />  <!-- 3 Bands KPI row -->
+        <RowDefinition Height="Auto" />  <!-- 4 Complexity KPI row (collapsed until bundle) -->
+        <RowDefinition Height="Auto" />  <!-- 5 Progress bar (collapses when idle) -->
+        <RowDefinition Height="Auto" />  <!-- 6 Filter chips row -->
+        <RowDefinition Height="*" />    <!-- 7 DataGrid -->
+        <RowDefinition Height="Auto" />  <!-- 8 Selection / upload bar -->
+        <RowDefinition Height="Auto" />  <!-- 9 Post-upload success panel (collapses when idle) -->
+        <RowDefinition Height="Auto" />  <!-- 10 Status -->
+      </Grid.RowDefinitions>
 
-    <!-- Title -->
-    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
-      <TextBlock Text="PracticeX Facility Discovery Agent" FontSize="22" FontWeight="SemiBold" />
-      <TextBlock Text="Phase 1 Preview" FontSize="11" Foreground="{StaticResource AccentBrush}" Margin="12,8,0,0" />
-    </StackPanel>
+      <!-- Title -->
+      <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
+        <TextBlock Text="PracticeX Facility Discovery Agent" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Text="Phase 1 Preview" FontSize="11" Foreground="{StaticResource AccentBrush}" Margin="12,8,0,0" />
+      </StackPanel>
 
-    <!-- Connection / API row -->
-    <Grid Grid.Row="1" Margin="0,0,0,12">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="120" />
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="120" />
-        <ColumnDefinition Width="280" />
-        <ColumnDefinition Width="Auto" />
-      </Grid.ColumnDefinitions>
-      <Label Grid.Column="0" Content="Connection:" VerticalAlignment="Center" />
-      <ComboBox Grid.Column="1" x:Name="ConnectionCombo" />
-      <Label Grid.Column="2" Content="API base:" VerticalAlignment="Center" Margin="16,0,0,0" />
-      <TextBox Grid.Column="3" x:Name="ApiBox" Text="https://localhost:7100" />
-      <Button Grid.Column="4" x:Name="RefreshConnectionsBtn" Content="Refresh" Style="{StaticResource SecondaryButton}" Margin="12,0,0,0" Click="OnRefreshConnections" />
-    </Grid>
-
-    <!-- Folder row -->
-    <Grid Grid.Row="2" Margin="0,0,0,16">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="120" />
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
-      </Grid.ColumnDefinitions>
-      <Label Grid.Column="0" Content="Folder:" VerticalAlignment="Center" />
-      <TextBox Grid.Column="1" x:Name="FolderBox" Text="C:\Users\harek\SYNEXAR INC\Fundraising" />
-      <Button Grid.Column="2" Content="Browse..." Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OnBrowse" />
-      <Button Grid.Column="3" x:Name="ScanBtn" Content="Scan folder" Margin="8,0,0,0" Click="OnScan" />
-    </Grid>
-
-    <!-- Bands KPI row -->
-    <Border Grid.Row="3" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="20,14" Margin="0,0,0,12">
-      <Grid>
+      <!-- Connection / API row -->
+      <Grid Grid.Row="1" Margin="0,0,0,12">
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="120" />
           <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="120" />
+          <ColumnDefinition Width="280" />
+          <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <StackPanel Grid.Column="0">
-          <TextBlock Text="TOTAL" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
-          <TextBlock x:Name="TotalText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
-        </StackPanel>
-        <StackPanel Grid.Column="1">
-          <TextBlock Text="STRONG" Foreground="{StaticResource GoodBrush}" FontSize="11" FontWeight="SemiBold" />
-          <TextBlock x:Name="StrongText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
-        </StackPanel>
-        <StackPanel Grid.Column="2">
-          <TextBlock Text="LIKELY" Foreground="{StaticResource AccentBrush}" FontSize="11" FontWeight="SemiBold" />
-          <TextBlock x:Name="LikelyText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
-        </StackPanel>
-        <StackPanel Grid.Column="3">
-          <TextBlock Text="POSSIBLE" Foreground="{StaticResource WarnBrush}" FontSize="11" FontWeight="SemiBold" />
-          <TextBlock x:Name="PossibleText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
-        </StackPanel>
-        <StackPanel Grid.Column="4">
-          <TextBlock Text="SKIPPED" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
-          <TextBlock x:Name="SkippedText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
-        </StackPanel>
+        <Label Grid.Column="0" Content="Connection:" VerticalAlignment="Center" />
+        <ComboBox Grid.Column="1" x:Name="ConnectionCombo" />
+        <Label Grid.Column="2" Content="API base:" VerticalAlignment="Center" Margin="16,0,0,0" />
+        <TextBox Grid.Column="3" x:Name="ApiBox" Text="https://localhost:7100" />
+        <Button Grid.Column="4" x:Name="RefreshConnectionsBtn" Content="Refresh" Style="{StaticResource SecondaryButton}" Margin="12,0,0,0" Click="OnRefreshConnections" />
       </Grid>
-    </Border>
 
-    <!-- Progress bar (visible during scan / upload) -->
-    <Border Grid.Row="4" x:Name="ProgressPanel" Visibility="Collapsed" Background="{StaticResource PanelBrush}" CornerRadius="8" Padding="16,12" Margin="0,0,0,12">
-      <StackPanel>
-        <Grid Margin="0,0,0,8">
+      <!-- Folder row -->
+      <Grid Grid.Row="2" Margin="0,0,0,16">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="120" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Label Grid.Column="0" Content="Folder:" VerticalAlignment="Center" />
+        <TextBox Grid.Column="1" x:Name="FolderBox" Text="C:\Users\harek\SYNEXAR INC\Fundraising" />
+        <Button Grid.Column="2" Content="Browse..." Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OnBrowse" />
+        <Button Grid.Column="3" x:Name="ScanBtn" Content="Scan folder" Margin="8,0,0,0" Click="OnScan" />
+      </Grid>
+
+      <!-- Bands KPI row -->
+      <Border Grid.Row="3" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="20,14" Margin="0,0,0,12">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="TOTAL" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
+            <TextBlock x:Name="TotalText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
+          </StackPanel>
+          <StackPanel Grid.Column="1">
+            <TextBlock Text="STRONG" Foreground="{StaticResource GoodBrush}" FontSize="11" FontWeight="SemiBold" />
+            <TextBlock x:Name="StrongText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
+          </StackPanel>
+          <StackPanel Grid.Column="2">
+            <TextBlock Text="LIKELY" Foreground="{StaticResource AccentBrush}" FontSize="11" FontWeight="SemiBold" />
+            <TextBlock x:Name="LikelyText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
+          </StackPanel>
+          <StackPanel Grid.Column="3">
+            <TextBlock Text="POSSIBLE" Foreground="{StaticResource WarnBrush}" FontSize="11" FontWeight="SemiBold" />
+            <TextBlock x:Name="PossibleText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
+          </StackPanel>
+          <StackPanel Grid.Column="4">
+            <TextBlock Text="SKIPPED" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
+            <TextBlock x:Name="SkippedText" Text="0" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- Complexity KPI row (post-upload only) -->
+      <Border Grid.Row="4" x:Name="ComplexityPanel" Visibility="Collapsed" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="20,14" Margin="0,0,0,12">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <TextBlock Grid.Row="0" Text="PROCESSING COMPLEXITY" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8" />
+          <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <TextBlock Text="SIMPLE" Foreground="{StaticResource GoodBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="SimpleText" Text="0" FontSize="22" FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+              <TextBlock Text="MODERATE" Foreground="{StaticResource AccentBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="ModerateText" Text="0" FontSize="22" FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <TextBlock Text="LARGE" Foreground="{StaticResource WarnBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="LargeText" Text="0" FontSize="22" FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="3">
+              <TextBlock Text="EXTRA" Foreground="{StaticResource BadBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="ExtraText" Text="0" FontSize="22" FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="4">
+              <TextBlock Text="EST. HOURS" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="EstHoursText" Text="0.0" FontSize="22" FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="5">
+              <TextBlock Text="EST. AZURE COST" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="EstCostText" Text="$0.00" FontSize="22" FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+          </Grid>
+          <TextBlock Grid.Row="2" x:Name="BlockerText" Text="" Foreground="{StaticResource BadBrush}" FontSize="13" Margin="0,8,0,0" TextWrapping="Wrap" />
+        </Grid>
+      </Border>
+
+      <!-- Progress bar (visible during scan / upload) -->
+      <Border Grid.Row="5" x:Name="ProgressPanel" Visibility="Collapsed" Background="{StaticResource PanelBrush}" CornerRadius="8" Padding="16,12" Margin="0,0,0,12">
+        <StackPanel>
+          <Grid Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" x:Name="ProgressLabel" Text="Working..." FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+            <TextBlock Grid.Column="1" x:Name="ProgressDetail" Text="" Foreground="{StaticResource MutedBrush}" />
+          </Grid>
+          <ProgressBar x:Name="ProgressBarCtl" IsIndeterminate="True" />
+        </StackPanel>
+      </Border>
+
+      <!-- Filter chip row -->
+      <Grid Grid.Row="6" Margin="0,0,0,10">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0" Text="Show bands:" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,12,0" />
+        <ToggleButton Grid.Column="1" x:Name="ShowStrongChip"   Content="Strong"   Style="{StaticResource FilterChip}" IsChecked="True"  Click="OnFilterChanged" Margin="0,0,8,0" />
+        <ToggleButton Grid.Column="2" x:Name="ShowLikelyChip"   Content="Likely"   Style="{StaticResource FilterChip}" IsChecked="True"  Click="OnFilterChanged" Margin="0,0,8,0" />
+        <ToggleButton Grid.Column="3" x:Name="ShowPossibleChip" Content="Possible" Style="{StaticResource FilterChip}" IsChecked="True"  Click="OnFilterChanged" Margin="0,0,8,0" />
+        <ToggleButton Grid.Column="4" x:Name="ShowSkippedChip"  Content="Skipped"  Style="{StaticResource FilterChip}" IsChecked="False" Click="OnFilterChanged" Margin="0,0,8,0" />
+        <TextBlock Grid.Column="6" x:Name="FilterCountText" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+      </Grid>
+
+      <!-- Results table -->
+      <DataGrid Grid.Row="7" x:Name="ResultsGrid"
+                AutoGenerateColumns="False" CanUserAddRows="False"
+                HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                Background="{StaticResource PanelBrush}"
+                Foreground="{StaticResource TextBrush}"
+                RowBackground="{StaticResource PanelBrush}"
+                AlternatingRowBackground="#192234"
+                BorderBrush="#334155" BorderThickness="1"
+                HorizontalGridLinesBrush="#334155"
+                SelectionMode="Single"
+                RowHeight="36"
+                FontSize="14">
+        <DataGrid.Columns>
+          <DataGridCheckBoxColumn Header="" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="44" />
+          <DataGridTextColumn Header="Band"  Binding="{Binding Band}" Width="80" IsReadOnly="True" />
+          <DataGridTextColumn Header="Score" Binding="{Binding ConfidenceDisplay}" Width="60" IsReadOnly="True" />
+          <DataGridTextColumn Header="Tier"  Binding="{Binding TierDisplay}" Width="60" IsReadOnly="True">
+            <DataGridTextColumn.ElementStyle>
+              <Style TargetType="TextBlock">
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding ComplexityTier}" Value="S">
+                    <Setter Property="Foreground" Value="{StaticResource GoodBrush}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding ComplexityTier}" Value="M">
+                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding ComplexityTier}" Value="L">
+                    <Setter Property="Foreground" Value="{StaticResource WarnBrush}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding ComplexityTier}" Value="X">
+                    <Setter Property="Foreground" Value="{StaticResource BadBrush}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </DataGridTextColumn.ElementStyle>
+          </DataGridTextColumn>
+          <DataGridTextColumn Header="Name"  Binding="{Binding Name}" Width="240" IsReadOnly="True" />
+          <DataGridTextColumn Header="Path"  Binding="{Binding RelativePath}" Width="*" IsReadOnly="True" />
+          <DataGridTextColumn Header="Type"  Binding="{Binding CandidateType}" Width="140" IsReadOnly="True" />
+          <DataGridTextColumn Header="Why"   Binding="{Binding ReasonsDisplay}" Width="220" IsReadOnly="True" />
+        </DataGrid.Columns>
+        <DataGrid.ColumnHeaderStyle>
+          <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#0B1220" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="10,10" />
+            <Setter Property="BorderBrush" Value="#334155" />
+            <Setter Property="BorderThickness" Value="0,0,1,0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+          </Style>
+        </DataGrid.ColumnHeaderStyle>
+        <DataGrid.CellStyle>
+          <Style TargetType="DataGridCell">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+          </Style>
+        </DataGrid.CellStyle>
+        <DataGrid.RowStyle>
+          <Style TargetType="DataGridRow">
+            <Setter Property="MinHeight" Value="36" />
+          </Style>
+        </DataGrid.RowStyle>
+      </DataGrid>
+
+      <!-- Selection bar -->
+      <Grid Grid.Row="8" Margin="0,12,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Button Grid.Column="0" Content="Select strong+likely" Style="{StaticResource SecondaryButton}" Click="OnSelectStrongLikely" />
+        <Button Grid.Column="1" Content="Select all visible" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OnSelectAllVisible" />
+        <Button Grid.Column="2" Content="Clear" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OnClearSelection" />
+        <TextBlock Grid.Column="3" x:Name="SelectionText" Text="0 selected" VerticalAlignment="Center" Margin="16,0,0,0" Foreground="{StaticResource MutedBrush}" />
+        <Button Grid.Column="4" x:Name="UploadBtn" Content="Prepare upload..." IsEnabled="False" Click="OnUpload" />
+      </Grid>
+
+      <!-- Post-upload success panel -->
+      <Border Grid.Row="9" x:Name="SuccessPanel" Visibility="Collapsed" Background="#0B2E1A" BorderBrush="{StaticResource GoodBrush}" BorderThickness="1" CornerRadius="8" Padding="18,14" Margin="0,16,0,0">
+        <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" x:Name="ProgressLabel" Text="Working..." FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-          <TextBlock Grid.Column="1" x:Name="ProgressDetail" Text="" Foreground="{StaticResource MutedBrush}" />
+          <StackPanel Grid.Column="0">
+            <TextBlock x:Name="SuccessTitle" Text="Upload complete" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource TextBrush}" />
+            <TextBlock x:Name="SuccessDetail" Text="" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
+          </StackPanel>
+          <Button Grid.Column="1" Content="Open review queue" Click="OnOpenReviewQueue" Margin="12,0,0,0" />
+          <Button Grid.Column="2" Content="Scan another folder" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OnScanAnother" />
         </Grid>
-        <ProgressBar x:Name="ProgressBarCtl" IsIndeterminate="True" />
-      </StackPanel>
-    </Border>
+      </Border>
 
-    <!-- Filter chip row -->
-    <Grid Grid.Row="5" Margin="0,0,0,10">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
-      </Grid.ColumnDefinitions>
-      <TextBlock Grid.Column="0" Text="Show bands:" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,12,0" />
-      <ToggleButton Grid.Column="1" x:Name="ShowStrongChip"   Content="Strong"   Style="{StaticResource FilterChip}" IsChecked="True"  Click="OnFilterChanged" Margin="0,0,8,0" />
-      <ToggleButton Grid.Column="2" x:Name="ShowLikelyChip"   Content="Likely"   Style="{StaticResource FilterChip}" IsChecked="True"  Click="OnFilterChanged" Margin="0,0,8,0" />
-      <ToggleButton Grid.Column="3" x:Name="ShowPossibleChip" Content="Possible" Style="{StaticResource FilterChip}" IsChecked="True"  Click="OnFilterChanged" Margin="0,0,8,0" />
-      <ToggleButton Grid.Column="4" x:Name="ShowSkippedChip"  Content="Skipped"  Style="{StaticResource FilterChip}" IsChecked="False" Click="OnFilterChanged" Margin="0,0,8,0" />
-      <TextBlock Grid.Column="6" x:Name="FilterCountText" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+      <!-- Status -->
+      <Border Grid.Row="10" Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="14,10" Margin="0,12,0,0">
+        <TextBlock x:Name="StatusText" Text="Ready. Pick a connection and a folder, then click Scan." Foreground="{StaticResource MutedBrush}" />
+      </Border>
     </Grid>
 
-    <!-- Results table -->
-    <DataGrid Grid.Row="6" x:Name="ResultsGrid"
-              AutoGenerateColumns="False" CanUserAddRows="False"
-              HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+    <!-- Prepare-upload modal overlay (semi-transparent backdrop + centered card) -->
+    <Grid x:Name="UploadPreviewModal" Visibility="Collapsed" Background="#A0000000">
+      <Border Width="640" MaxHeight="640"
               Background="{StaticResource PanelBrush}"
-              Foreground="{StaticResource TextBrush}"
-              RowBackground="{StaticResource PanelBrush}"
-              AlternatingRowBackground="#192234"
-              BorderBrush="#334155" BorderThickness="1"
-              HorizontalGridLinesBrush="#334155"
-              SelectionMode="Single"
-              RowHeight="36"
-              FontSize="14">
-      <DataGrid.Columns>
-        <DataGridCheckBoxColumn Header="" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="44" />
-        <DataGridTextColumn Header="Band"  Binding="{Binding Band}" Width="100" IsReadOnly="True" />
-        <DataGridTextColumn Header="Score" Binding="{Binding ConfidenceDisplay}" Width="70" IsReadOnly="True" />
-        <DataGridTextColumn Header="Name"  Binding="{Binding Name}" Width="260" IsReadOnly="True" />
-        <DataGridTextColumn Header="Path"  Binding="{Binding RelativePath}" Width="*" IsReadOnly="True" />
-        <DataGridTextColumn Header="Type"  Binding="{Binding CandidateType}" Width="140" IsReadOnly="True" />
-        <DataGridTextColumn Header="Why"   Binding="{Binding ReasonsDisplay}" Width="240" IsReadOnly="True" />
-      </DataGrid.Columns>
-      <DataGrid.ColumnHeaderStyle>
-        <Style TargetType="DataGridColumnHeader">
-          <Setter Property="Background" Value="#0B1220" />
-          <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
-          <Setter Property="FontWeight" Value="SemiBold" />
-          <Setter Property="Padding" Value="10,10" />
-          <Setter Property="BorderBrush" Value="#334155" />
-          <Setter Property="BorderThickness" Value="0,0,1,0" />
-          <Setter Property="HorizontalContentAlignment" Value="Left" />
-        </Style>
-      </DataGrid.ColumnHeaderStyle>
-      <DataGrid.CellStyle>
-        <Style TargetType="DataGridCell">
-          <Setter Property="BorderThickness" Value="0" />
-          <Setter Property="Padding" Value="10,8" />
-          <Setter Property="Background" Value="Transparent" />
-          <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-          <Setter Property="VerticalContentAlignment" Value="Center" />
-        </Style>
-      </DataGrid.CellStyle>
-      <DataGrid.RowStyle>
-        <Style TargetType="DataGridRow">
-          <Setter Property="MinHeight" Value="36" />
-        </Style>
-      </DataGrid.RowStyle>
-    </DataGrid>
+              BorderBrush="{StaticResource AccentBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="24"
+              VerticalAlignment="Center" HorizontalAlignment="Center">
+        <StackPanel>
+          <TextBlock Text="Confirm upload" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,4" />
+          <TextBlock x:Name="PreviewSubtitle" Text="" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,18" TextWrapping="Wrap" />
 
-    <!-- Selection bar -->
-    <Grid Grid.Row="7" Margin="0,12,0,0">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
-      </Grid.ColumnDefinitions>
-      <Button Grid.Column="0" Content="Select strong+likely" Style="{StaticResource SecondaryButton}" Click="OnSelectStrongLikely" />
-      <Button Grid.Column="1" Content="Select all visible" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OnSelectAllVisible" />
-      <Button Grid.Column="2" Content="Clear" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OnClearSelection" />
-      <TextBlock Grid.Column="3" x:Name="SelectionText" Text="0 selected" VerticalAlignment="Center" Margin="16,0,0,0" Foreground="{StaticResource MutedBrush}" />
-      <Button Grid.Column="4" x:Name="UploadBtn" Content="Upload selected" IsEnabled="False" Click="OnUpload" />
-    </Grid>
+          <Grid Margin="0,0,0,14">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <TextBlock Text="FILES" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="PreviewFileCount" Text="0" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+              <TextBlock Text="TOTAL SIZE" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="PreviewTotalSize" Text="0 B" FontSize="24" FontWeight="SemiBold" Margin="0,2,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <TextBlock Text="BANDS" Foreground="{StaticResource MutedBrush}" FontSize="11" FontWeight="SemiBold" />
+              <TextBlock x:Name="PreviewBands" Text="" FontSize="14" Margin="0,4,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
 
-    <!-- Post-upload success panel -->
-    <Border Grid.Row="8" x:Name="SuccessPanel" Visibility="Collapsed" Background="#0B2E1A" BorderBrush="{StaticResource GoodBrush}" BorderThickness="1" CornerRadius="8" Padding="18,14" Margin="0,16,0,0">
-      <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-        <StackPanel Grid.Column="0">
-          <TextBlock x:Name="SuccessTitle" Text="Upload complete" FontWeight="SemiBold" FontSize="16" Foreground="{StaticResource TextBrush}" />
-          <TextBlock x:Name="SuccessDetail" Text="" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
+          <TextBlock Text="Sample of files about to be sent:" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,6" />
+          <Border Background="#0B1220" CornerRadius="6" Padding="10" Margin="0,0,0,14">
+            <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto">
+              <ItemsControl x:Name="PreviewFileList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding}" Foreground="{StaticResource TextBrush}" FontSize="12" Margin="0,1" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Border>
+
+          <TextBlock Text="Notes (optional, attached to the batch):" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,4" />
+          <TextBox x:Name="PreviewNotesBox" Height="56" AcceptsReturn="True" TextWrapping="Wrap" Margin="0,0,0,14" />
+
+          <TextBlock x:Name="PreviewDisclaimer" Text="" Foreground="{StaticResource MutedBrush}" FontSize="11" FontStyle="Italic" Margin="0,0,0,14" TextWrapping="Wrap" />
+
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Back" Style="{StaticResource SecondaryButton}" Click="OnCancelUpload" Margin="0,0,8,0" />
+            <Button x:Name="ConfirmUploadBtn" Content="Confirm and upload" Click="OnConfirmUpload" />
+          </StackPanel>
         </StackPanel>
-        <Button Grid.Column="1" Content="Open review queue" Click="OnOpenReviewQueue" Margin="12,0,0,0" />
-        <Button Grid.Column="2" Content="Scan another folder" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Click="OnScanAnother" />
-      </Grid>
-    </Border>
-
-    <!-- Status -->
-    <Border Grid.Row="9" Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="14,10" Margin="0,12,0,0">
-      <TextBlock x:Name="StatusText" Text="Ready. Pick a connection and a folder, then click Scan." Foreground="{StaticResource MutedBrush}" />
-    </Border>
+      </Border>
+    </Grid>
   </Grid>
 </Window>

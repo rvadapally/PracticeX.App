@@ -9,6 +9,7 @@ using PracticeX.Application.SourceDiscovery.Outlook;
 using PracticeX.Application.SourceDiscovery.Storage;
 using PracticeX.Discovery.Classification;
 using PracticeX.Discovery.Pipelines;
+using PracticeX.Discovery.Signatures;
 using PracticeX.Discovery.Validation;
 using PracticeX.Infrastructure.Persistence;
 using PracticeX.Infrastructure.SourceDiscovery.Complexity;
@@ -42,6 +43,13 @@ public static class DependencyInjection
 
         services.AddSingleton<IDocumentClassifier, RuleBasedContractClassifier>();
         services.AddSingleton<IDocumentValidityInspector, BasicDocumentValidityInspector>();
+        services.AddSingleton<PdfSignatureDetector>();
+        services.AddSingleton<DocxSignatureDetector>();
+        services.AddSingleton<ISignatureDetector>(sp => new CompositeSignatureDetector(new ISignatureDetector[]
+        {
+            sp.GetRequiredService<PdfSignatureDetector>(),
+            sp.GetRequiredService<DocxSignatureDetector>()
+        }));
         services.AddSingleton<IDocumentDiscoveryPipeline, DefaultDocumentDiscoveryPipeline>();
         services.AddSingleton<PdfComplexityProfiler>();
         services.AddSingleton<ExcelComplexityProfiler>();

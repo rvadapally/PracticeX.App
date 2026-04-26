@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PracticeX.Application.Common;
 using PracticeX.Application.SourceDiscovery.Storage;
 using PracticeX.Discovery.Classification;
+using PracticeX.Discovery.Signatures;
 using PracticeX.Discovery.Validation;
 using PracticeX.Domain.Sources;
 using PracticeX.Infrastructure.Persistence;
@@ -56,6 +57,12 @@ internal sealed class OrchestratorFixture : IDisposable
             new DocxComplexityProfiler(),
             new PlainTextComplexityProfiler());
 
+        var signatureDetector = new CompositeSignatureDetector(new ISignatureDetector[]
+        {
+            new PdfSignatureDetector(),
+            new DocxSignatureDetector()
+        });
+
         Orchestrator = new IngestionOrchestrator(
             Db,
             Storage,
@@ -63,6 +70,7 @@ internal sealed class OrchestratorFixture : IDisposable
             new BasicDocumentValidityInspector(),
             profiler,
             new PlaceholderPricingPolicy(),
+            signatureDetector,
             Clock,
             NullLogger<IngestionOrchestrator>.Instance);
     }

@@ -1,56 +1,79 @@
 using PracticeX.Discovery.Classification;
 using PracticeX.Discovery.Contracts;
+using PracticeX.Discovery.Signatures;
 using PracticeX.Discovery.Validation;
 using PracticeX.Domain.Documents;
 
 namespace PracticeX.Discovery.Pipelines;
 
 /// <summary>
-/// Default impl. Today: classifier + validity inspector (when bytes available).
-/// Slice 2 inserts signature detection into the same call path so HasSignature/
-/// SignatureCount/SignatureProviders get populated. The cloud orchestrator and
-/// the desktop agent both call into this — their wire output is byte-identical.
+/// Default impl. Bytes-optional pipeline: classifier always runs; validity
+/// inspector and signature detector run when bytes are supplied.
+/// A detected signature boosts confidence by +0.30 (capped at 0.99), pushing
+/// signed contracts into the Strong band even when the filename is opaque.
 /// </summary>
 public sealed class DefaultDocumentDiscoveryPipeline(
     IDocumentClassifier classifier,
-    IDocumentValidityInspector? validityInspector = null) : IDocumentDiscoveryPipeline
+    IDocumentValidityInspector? validityInspector = null,
+    ISignatureDetector? signatureDetector = null) : IDocumentDiscoveryPipeline
 {
+    public const decimal SignatureConfidenceBoost = 0.30m;
+
     public Task<ManifestScoredItemDto> ScoreAsync(
         ManifestItemDto item,
         byte[]? content,
         CancellationToken cancellationToken)
     {
         var folderHint = ExtractFolderHint(item.RelativePath);
+        var mimeType = item.MimeType ?? "application/octet-stream";
 
         var classification = classifier.Classify(new ClassificationInput
         {
             FileName = item.Name,
             RelativePath = item.RelativePath,
-            MimeType = item.MimeType ?? "application/octet-stream",
+            MimeType = mimeType,
             SizeBytes = item.SizeBytes,
             FolderHint = folderHint,
             Hints = []
         });
 
         var reasonCodes = classification.ReasonCodes.ToList();
-
-        // Slice 2 will populate these inside this same method.
+        var confidence = classification.Confidence;
         var hasSignature = false;
         var signatureCount = 0;
         IReadOnlyList<string> signatureProviders = Array.Empty<string>();
 
-        if (content is not null && content.Length > 0 && validityInspector is not null)
+        if (content is not null && content.Length > 0)
         {
-            var validity = validityInspector.Inspect(content, item.MimeType ?? "application/octet-stream", item.Name);
-            foreach (var rc in validity.ReasonCodes)
+            if (validityInspector is not null)
             {
-                reasonCodes.Add(rc);
+                var validity = validityInspector.Inspect(content, mimeType, item.Name);
+                foreach (var rc in validity.ReasonCodes)
+                {
+                    reasonCodes.Add(rc);
+                }
+            }
+
+            if (signatureDetector is not null && signatureDetector.CanInspect(mimeType, item.Name))
+            {
+                var sig = signatureDetector.Inspect(content, mimeType, item.Name);
+                if (sig.HasSignature)
+                {
+                    hasSignature = true;
+                    signatureCount = sig.SignatureCount;
+                    signatureProviders = sig.Providers;
+                    foreach (var rc in sig.ReasonCodes)
+                    {
+                        if (!reasonCodes.Contains(rc)) reasonCodes.Add(rc);
+                    }
+                    confidence = Math.Min(0.99m, confidence + SignatureConfidenceBoost);
+                }
             }
         }
 
         var manifestItemId = BuildManifestItemId(item);
-        var band = ManifestBands.From(classification.Confidence);
-        var action = ManifestBands.RecommendedAction(classification.Confidence);
+        var band = ManifestBands.From(confidence);
+        var action = ManifestBands.RecommendedAction(confidence);
 
         var scored = new ManifestScoredItemDto(
             ManifestItemId: manifestItemId,
@@ -58,7 +81,7 @@ public sealed class DefaultDocumentDiscoveryPipeline(
             Name: item.Name,
             SizeBytes: item.SizeBytes,
             CandidateType: classification.CandidateType,
-            Confidence: classification.Confidence,
+            Confidence: decimal.Round(confidence, 4),
             ReasonCodes: reasonCodes,
             RecommendedAction: action,
             Band: band,

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -8,6 +9,7 @@ using PracticeX.Application.SourceDiscovery.Ingestion;
 using PracticeX.Application.SourceDiscovery.Storage;
 using PracticeX.Discovery.Classification;
 using PracticeX.Discovery.Contracts;
+using PracticeX.Discovery.Signatures;
 using PracticeX.Discovery.Validation;
 using PracticeX.Domain.Audit;
 using PracticeX.Domain.Documents;
@@ -33,10 +35,12 @@ public sealed class IngestionOrchestrator(
     IDocumentValidityInspector validityInspector,
     IComplexityProfiler complexityProfiler,
     IPricingPolicy pricingPolicy,
+    ISignatureDetector signatureDetector,
     IClock clock,
     ILogger<IngestionOrchestrator> logger) : IIngestionOrchestrator
 {
     public const string ManifestExternalIdPrefix = "manifest:";
+    private const decimal SignatureConfidenceBoost = 0.30m;
     public async Task<Result<IngestionBatchSummary>> IngestAsync(
         IngestionRequest request,
         DiscoveryResult discovery,
@@ -131,8 +135,39 @@ public sealed class IngestionOrchestrator(
             SkippedCount = skippedCount,
             ErrorCount = errorCount,
             Status = batch.Status,
-            Items = summaries
+            Items = summaries,
+            Complexity = AggregateComplexity(summaries)
         });
+    }
+
+    /// <summary>
+    /// Builds the per-batch complexity aggregate from the per-item summaries.
+    /// Returns null if no item carries a tier (e.g. all duplicates / mail
+    /// containers — nothing to aggregate over).
+    /// </summary>
+    private static BatchComplexityProfile? AggregateComplexity(IReadOnlyList<IngestionItemSummary> items)
+    {
+        var tiered = items.Where(i => !string.IsNullOrEmpty(i.ComplexityTier)).ToList();
+        if (tiered.Count == 0) return null;
+
+        var blockerCounts = tiered
+            .SelectMany(i => i.ComplexityBlockers ?? Array.Empty<string>())
+            .GroupBy(b => b)
+            .Select(g => new BlockerSummary(g.Key, g.Count()))
+            .OrderByDescending(b => b.Count)
+            .ToList();
+
+        var totalHours = tiered.Sum(i => i.EstimatedComplexityHours ?? 0m);
+
+        return new BatchComplexityProfile
+        {
+            SimpleCount   = tiered.Count(i => i.ComplexityTier == "S"),
+            ModerateCount = tiered.Count(i => i.ComplexityTier == "M"),
+            LargeCount    = tiered.Count(i => i.ComplexityTier == "L"),
+            ExtraCount    = tiered.Count(i => i.ComplexityTier == "X"),
+            Blockers = blockerCounts,
+            TotalEstimatedHours = totalHours > 0m ? totalHours : null
+        };
     }
 
     private async Task<IngestionItemSummary> IngestItemAsync(
@@ -202,6 +237,7 @@ public sealed class IngestionOrchestrator(
         DocumentAsset asset;
         bool isDuplicate;
         ValidityReport? validity = null;
+        SignatureReport? signature = null;
         if (existingAsset is not null)
         {
             asset = existingAsset;
@@ -212,6 +248,14 @@ public sealed class IngestionOrchestrator(
             validity = validityInspector.Inspect(item.InlineContent, item.MimeType, item.Name);
             var complexity = complexityProfiler.Profile(item.InlineContent, item.MimeType, item.Name, validity);
             var estimatedHours = pricingPolicy.EstimateHours(complexity);
+
+            // Detect signatures only on supported containers; skip otherwise to avoid wasted work.
+            if (signatureDetector.CanInspect(item.MimeType, item.Name))
+            {
+                signature = signatureDetector.Inspect(item.InlineContent, item.MimeType, item.Name);
+            }
+
+            var assetMetadata = MergeAssetMetadata(complexity.MetadataJson, signature);
 
             asset = new DocumentAsset
             {
@@ -231,7 +275,7 @@ public sealed class IngestionOrchestrator(
                 ComplexityTier = complexity.Tier.ToCode(),
                 ComplexityFactorsJson = JsonSerializer.Serialize(complexity.Factors),
                 ComplexityBlockersJson = JsonSerializer.Serialize(complexity.Blockers),
-                MetadataJson = complexity.MetadataJson,
+                MetadataJson = assetMetadata,
                 EstimatedComplexityHours = estimatedHours,
                 CreatedAt = clock.UtcNow
             };
@@ -250,22 +294,47 @@ public sealed class IngestionOrchestrator(
             Hints = item.Hints
         });
 
-        var reasonCodes = isDuplicate
-            ? classification.ReasonCodes.Append(IngestionReasonCodes.DuplicateContent).ToList()
-            : (validity is null
-                ? classification.ReasonCodes.ToList()
-                : classification.ReasonCodes.Concat(validity.ReasonCodes).ToList());
+        // Combine reason codes from classifier + validity + signature, plus dedupe marker.
+        var reasonCodes = classification.ReasonCodes.ToList();
+        if (validity is not null)
+        {
+            foreach (var rc in validity.ReasonCodes) reasonCodes.Add(rc);
+        }
+        if (signature is not null && signature.HasSignature)
+        {
+            foreach (var rc in signature.ReasonCodes)
+            {
+                if (!reasonCodes.Contains(rc)) reasonCodes.Add(rc);
+            }
+        }
+        if (isDuplicate)
+        {
+            reasonCodes.Add(IngestionReasonCodes.DuplicateContent);
+        }
+
+        // Boost confidence when a signature is detected — a Docusigned PDF in a
+        // generic folder still lands in the Strong band.
+        var boostedConfidence = signature is not null && signature.HasSignature
+            ? Math.Min(0.99m, classification.Confidence + SignatureConfidenceBoost)
+            : classification.Confidence;
+        boostedConfidence = decimal.Round(boostedConfidence, 4);
+
+        var promotedStatus = signature is not null && signature.HasSignature
+            && classification.Status == DocumentCandidateStatus.Candidate
+            && boostedConfidence >= 0.55m
+                ? DocumentCandidateStatus.PendingReview
+                : classification.Status;
 
         var candidateStatus = isDuplicate
             ? DocumentCandidateStatus.Skipped
-            : classification.Status;
+            : promotedStatus;
 
         var candidate = new DocumentCandidate
         {
             TenantId = request.TenantId,
             DocumentAssetId = asset.Id,
             CandidateType = classification.CandidateType,
-            Confidence = classification.Confidence,
+            Confidence = boostedConfidence,
             Status = candidateStatus,
             ReasonCodesJson = JsonSerializer.Serialize(reasonCodes),
             ClassifierVersion = classifier.Version,
@@ -300,7 +369,7 @@ public sealed class IngestionOrchestrator(
                 ResourceType = "document_candidate",
                 ResourceId = candidate.Id,
                 Reason = $"classifier:{classifier.Version}|type:{classification.CandidateType}",
-                Priority = classification.Confidence < 0.7m ? 1 : 2,
+                Priority = boostedConfidence < 0.7m ? 1 : 2,
                 Decision = "pending",
                 CreatedAt = clock.UtcNow
             });
@@ -317,9 +386,11 @@ public sealed class IngestionOrchestrator(
             MetadataJson = JsonSerializer.Serialize(new
             {
                 candidateType = classification.CandidateType,
-                confidence = classification.Confidence,
+                confidence = boostedConfidence,
                 reasonCodes,
-                duplicate = isDuplicate
+                duplicate = isDuplicate,
+                hasSignature = signature is not null && signature.HasSignature,
+                signatureProviders = signature?.Providers ?? Array.Empty<string>()
             }),
             CreatedAt = clock.UtcNow
         });
@@ -333,11 +404,80 @@ public sealed class IngestionOrchestrator(
             DocumentCandidateId = candidate.Id,
             Name = item.Name,
             CandidateType = classification.CandidateType,
-            Confidence = classification.Confidence,
+            Confidence = boostedConfidence,
             ReasonCodes = reasonCodes,
             Status = candidateStatus,
-            RelativePath = item.RelativePath
+            RelativePath = item.RelativePath,
+            ComplexityTier = asset.ComplexityTier,
+            ComplexityFactors = SafeDeserializeStringList(asset.ComplexityFactorsJson),
+            ComplexityBlockers = SafeDeserializeStringList(asset.ComplexityBlockersJson),
+            EstimatedComplexityHours = asset.EstimatedComplexityHours
         };
+    }
+
+    /// <summary>
+    /// Merges complexity-profiler metadata with signature info into the
+    /// document_assets.metadata_json column. Both sides are optional;
+    /// produces a single JSON object with stable keys "complexity" and
+    /// "signature" so future readers don't need to know the producers.
+    /// </summary>
+    private static string? MergeAssetMetadata(string? complexityJson, SignatureReport? signature)
+    {
+        var hasComplexity = !string.IsNullOrWhiteSpace(complexityJson);
+        var hasSignature = signature is not null && signature.HasSignature;
+        if (!hasComplexity && !hasSignature)
+        {
+            return null;
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+
+            if (hasComplexity)
+            {
+                writer.WritePropertyName("complexity");
+                using var doc = JsonDocument.Parse(complexityJson!);
+                doc.RootElement.WriteTo(writer);
+            }
+
+            if (hasSignature)
+            {
+                writer.WritePropertyName("signature");
+                writer.WriteStartObject();
+                writer.WriteBoolean("has_signature", true);
+                writer.WriteNumber("signature_count", signature!.SignatureCount);
+                writer.WritePropertyName("providers");
+                writer.WriteStartArray();
+                foreach (var p in signature.Providers) writer.WriteStringValue(p);
+                writer.WriteEndArray();
+                writer.WritePropertyName("details");
+                writer.WriteStartArray();
+                foreach (var d in signature.Details)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("provider", d.Provider);
+                    if (!string.IsNullOrWhiteSpace(d.SignerName)) writer.WriteString("signer_name", d.SignerName);
+                    if (d.PageNumber.HasValue) writer.WriteNumber("page_number", d.PageNumber.Value);
+                    if (!string.IsNullOrWhiteSpace(d.EnvelopeId)) writer.WriteString("envelope_id", d.EnvelopeId);
+                    if (d.SignedAtUtc.HasValue) writer.WriteString("signed_at_utc", d.SignedAtUtc.Value);
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static IReadOnlyList<string>? SafeDeserializeStringList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { return JsonSerializer.Deserialize<List<string>>(json); }
+        catch { return null; }
     }
 
     public async Task<Result<ManifestScanResult>> ScoreManifestAsync(
@@ -519,7 +659,8 @@ public sealed class IngestionOrchestrator(
             SkippedCount = batch.SkippedCount,
             ErrorCount = batch.ErrorCount,
             Status = batch.Status,
-            Items = summaries
+            Items = summaries,
+            Complexity = AggregateComplexity(summaries)
         });
     }
 
