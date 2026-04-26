@@ -1,6 +1,8 @@
 # PracticeX Facility Discovery Agent — Spec
 
-> Status: **specification only** (Phase 0). The agent is not built in this repo yet. The cloud-side manifest + bundle endpoints (`POST /api/sources/connections/{id}/folder/manifest`, `POST /api/sources/connections/{id}/folder/bundles`) are already shipped and serve both the browser flow and the future agent.
+> Status: Phase 0 (cloud manifest + bundle endpoints) is shipped. **Phase 1 ships in this PR** — a one-shot console CLI (`practicex-agent`) that exercises the cloud endpoints end-to-end against a local folder, with no SQLite cache and no tray UI yet. Phases 2–4 below are spec only.
+>
+> The Phase 1 CLI lives at `src/PracticeX.Agent.Cli/`. See [Phase 1 CLI](#phase-1-cli-what-ships-in-this-pr) below.
 
 ## Why an agent at all?
 
@@ -179,12 +181,59 @@ All persistence reuses the existing tables. Agent identity is recorded on `audit
 - Logs do not contain document content; only file paths, scores, reason codes, and counters.
 - Local privacy deny-list ships as a default config (PHI patterns, EHR exports). Customers can extend.
 
+## Phase 1 CLI — what ships in this PR
+
+Project: `src/PracticeX.Agent.Cli/`. Single-file `practicex-agent.exe` (or `practicex-agent` on Linux/macOS) built via `dotnet publish -c Release`. Pure HTTP client — references `PracticeX.Domain` only; no `PracticeX.Infrastructure`, no `PracticeX.Api`.
+
+### Command
+
+```
+practicex-agent scan \
+  --root "C:\Users\harek\SYNEXAR INC\Fundraising" \
+  --connection-id 11111111-2222-3333-4444-555555555555 \
+  --api https://localhost:7100 \
+  --token $env:PRACTICEX_TOKEN \
+  --auto-select strong,likely \
+  [--dry-run]
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--root` | required | Folder to scan recursively. |
+| `--connection-id` | required | Existing `source_connections.id` of type `local_folder`. CLI does not auto-create — user creates the connection once via the web app. |
+| `--api` | `https://localhost:7100` | API base URL. |
+| `--token` | reads `PRACTICEX_TOKEN` env var, optional in dev | Bearer token. Sent as `Authorization: Bearer …` when present. The dev API still uses `DemoCurrentUserContext`, so the value is currently a no-op pass-through; Phase 2 wires real auth without changing the CLI surface. |
+| `--auto-select` | `strong,likely` | Bands to upload. `strong,likely,possible` casts wider; `strong` is conservative. |
+| `--dry-run` | off | Run the manifest scan and print the report; skip the bundle upload. |
+| `--insecure` | off | Skip TLS validation (dev only — local self-signed cert). |
+
+### Flow
+
+1. Walk `--root` recursively. Skip system / hidden / `node_modules` / `.git` / `*.tmp` / `*.log`. Build `List<ManifestItemDto>` of `{relativePath, name, sizeBytes, lastModifiedUtc, mimeType?}`.
+2. `POST /api/sources/connections/{id}/folder/manifest` with the list. Parse `ManifestScanResponse`.
+3. Print Strong / Likely / Possible / Skipped counts and the auto-selection plan.
+4. If `--dry-run`, exit 0. Otherwise stream the selected files as a multipart POST to `/folder/bundles?batchId=…` (per-part `paths[i]` and `manifestItemIds[i]`).
+5. Print the final `IngestionBatchSummaryDto` — candidates created, duplicates skipped, errors.
+
+### Exit codes
+
+- `0` — success.
+- `1` — partial (any item failed but the batch completed).
+- `2` — transport / auth / configuration error.
+
+### Phase 1 acceptance — `C:\Users\harek\SYNEXAR INC\Fundraising`
+
+- CLI inventories the tree without uploading bytes during scan (only JSON hits `/folder/manifest`, no multipart yet).
+- A `phase='manifest'` batch appears via `GET /api/sources/batches`.
+- After bundle upload, the same batch shows `phase='complete'`; selected files in `GET /api/sources/batches/{id}` carry `extraction_route` and `validity_status` populated.
+- A second run reports duplicates via per-tenant SHA dedupe (`ix_document_assets_tenant_id_sha256`), even without a local SQLite cache.
+
 ## Roadmap
 
 | Phase | Scope | Verification target |
 |---|---|---|
-| **0** *(this PR)* | Cloud-side manifest + bundle endpoints. Browser uses them. Agent spec doc only. | `C:\Users\harek\SYNEXAR INC\Fundraising` via the browser at http://localhost:5173 |
-| **1** | Agent CLI: `practicex-agent scan --root "C:\Users\harek\SYNEXAR INC"`. One-shot scanner; no SQLite cache, no tray UI. Calls existing manifest + bundle endpoints. Validates the wire format end-to-end. | `C:\Users\harek\SYNEXAR INC` via CLI; verify `phase='manifest'` batch then `phase='complete'` batch in `GET /api/sources/batches`. |
+| **0** *(prior PR)* | Cloud-side manifest + bundle endpoints. Browser uses them. | `C:\Users\harek\SYNEXAR INC\Fundraising` via the browser at http://localhost:5173 |
+| **1** *(this PR)* | Agent CLI: `practicex-agent scan --root "C:\Users\harek\SYNEXAR INC"`. One-shot scanner; no SQLite cache, no tray UI. Calls existing manifest + bundle endpoints. Validates the wire format end-to-end. | `C:\Users\harek\SYNEXAR INC` via CLI; verify `phase='manifest'` batch then `phase='complete'` batch in `GET /api/sources/batches`. |
 | **2** | SQLite cache + delta scans. Quick-fingerprint dedupe. Resumable bundle uploads. Confidence-gated OCR. Local PDF text-layer detection via PdfPig. | Re-run scan against the same root, expect "12 new files of 1,847" telemetry. |
 | **3** | WinUI 3 tray UI. Scheduled scans. Network-share support. Bandwidth controls. Local privacy deny-list. | Tray UI shows "Last scan: 17 new files. 12 candidates. 5 minutes ago." |
 | **4** | Windows Service variant + signed MSI installer. Auto-update. IT-grade logging. | Customer pilot at a real facility. |

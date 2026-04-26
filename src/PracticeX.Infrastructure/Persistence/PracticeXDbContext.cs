@@ -9,7 +9,7 @@ using PracticeX.Domain.Workflow;
 
 namespace PracticeX.Infrastructure.Persistence;
 
-public sealed class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : DbContext(options)
+public class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : DbContext(options)
 {
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Facility> Facilities => Set<Facility>();
@@ -38,7 +38,15 @@ public sealed class PracticeXDbContext(DbContextOptions<PracticeXDbContext> opti
         ConfigureEvidence(modelBuilder);
         ConfigureWorkflow(modelBuilder);
         ConfigureAudit(modelBuilder);
+        OnModelCreatingExtra(modelBuilder);
     }
+
+    /// <summary>
+    /// Hook for test contexts to register provider-specific value converters
+    /// (e.g. JsonDocument → string for the EF InMemory provider). No-op in
+    /// production.
+    /// </summary>
+    protected virtual void OnModelCreatingExtra(ModelBuilder modelBuilder) { }
 
     private static void ConfigureOrganization(ModelBuilder modelBuilder)
     {
