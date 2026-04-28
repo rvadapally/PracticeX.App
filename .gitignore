@@ -505,3 +505,7 @@ src/PracticeX.Api/var/
 # Customer documents — never commit, real PII / pre-BAA
 /data/
 /data/**
+
+# Claude Code per-user overrides (machine-specific paths, tokens)
+.claude/settings.local.json
+.claude/worktrees/
