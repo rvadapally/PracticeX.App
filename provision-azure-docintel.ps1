@@ -43,7 +43,7 @@ if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
 Write-Host "[1/5] Verifying Azure login..." -ForegroundColor Yellow
 $null = & az account show 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Not logged in. Opening browser — sign in as rvadapally@practicex.ai"
+    Write-Host "Not logged in. Opening browser - sign in as rvadapally@practicex.ai"
     & az login --only-show-errors | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] az login failed." -ForegroundColor Red
@@ -162,7 +162,7 @@ Write-Host "Endpoint: $endpoint"
 Write-Host "Key1:     $key1"
 Write-Host ""
 Write-Host "Saved to: $outFile"
-Write-Host "(this file is in data\ which is gitignored — never commit)"
+Write-Host "(this file is in data\ which is gitignored - never commit)"
 Write-Host ""
 Write-Host "Next: paste the endpoint + key1 above into chat with Claude"
 Write-Host "so the user-secrets get configured and Doc Intel goes live."
