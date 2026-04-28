@@ -4,10 +4,12 @@ using Microsoft.Extensions.DependencyInjection;
 using PracticeX.Application.Common;
 using PracticeX.Application.SourceDiscovery.Complexity;
 using PracticeX.Application.SourceDiscovery.Connectors;
+using PracticeX.Application.SourceDiscovery.DocumentAi;
 using PracticeX.Application.SourceDiscovery.Ingestion;
 using PracticeX.Application.SourceDiscovery.Outlook;
 using PracticeX.Application.SourceDiscovery.Storage;
 using PracticeX.Discovery.Classification;
+using PracticeX.Discovery.DocumentAi;
 using PracticeX.Discovery.FieldExtraction;
 using PracticeX.Discovery.Pipelines;
 using PracticeX.Discovery.Signatures;
@@ -16,6 +18,7 @@ using PracticeX.Discovery.Validation;
 using PracticeX.Infrastructure.Persistence;
 using PracticeX.Infrastructure.SourceDiscovery.Complexity;
 using PracticeX.Infrastructure.SourceDiscovery.Connectors;
+using PracticeX.Infrastructure.SourceDiscovery.DocumentAi;
 using PracticeX.Infrastructure.SourceDiscovery.Ingestion;
 using PracticeX.Infrastructure.SourceDiscovery.Outlook;
 using PracticeX.Infrastructure.SourceDiscovery.Pricing;
@@ -42,6 +45,19 @@ public static class DependencyInjection
 
         services.Configure<DocumentStorageOptions>(configuration.GetSection(DocumentStorageOptions.SectionName));
         services.Configure<MicrosoftGraphOptions>(configuration.GetSection(MicrosoftGraphOptions.SectionName));
+        services.Configure<DocumentIntelligenceOptions>(configuration.GetSection(DocumentIntelligenceOptions.SectionName));
+
+        var docIntelEnabled = configuration
+            .GetSection(DocumentIntelligenceOptions.SectionName)
+            .GetValue<bool>(nameof(DocumentIntelligenceOptions.Enabled));
+        if (docIntelEnabled)
+        {
+            services.AddSingleton<IDocumentIntelligenceProvider, AzureDocumentIntelligenceProvider>();
+        }
+        else
+        {
+            services.AddSingleton<IDocumentIntelligenceProvider, NoOpDocumentIntelligenceProvider>();
+        }
 
         services.AddSingleton<IDocumentClassifier, RuleBasedContractClassifier>();
         services.AddSingleton<IDocumentValidityInspector, BasicDocumentValidityInspector>();

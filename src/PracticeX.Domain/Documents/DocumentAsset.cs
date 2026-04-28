@@ -25,6 +25,15 @@ public sealed class DocumentAsset : Entity
     public string? ComplexityBlockersJson { get; set; }          // jsonb, ["macros_detected",...]
     public string? MetadataJson { get; set; }                    // jsonb, format-specific details
     public decimal? EstimatedComplexityHours { get; set; }
+
+    // Doc Intelligence layout output — populated by AzureDocumentIntelligenceProvider
+    // when extraction routes through cloud OCR. Downstream extractors read
+    // LayoutJson when local PdfPig/DocX text extraction was insufficient.
+    public string? LayoutJson { get; set; }                      // jsonb
+    public string? LayoutProvider { get; set; }                  // 'azure-document-intelligence'
+    public string? LayoutModel { get; set; }                     // 'prebuilt-layout' / 'prebuilt-contract'
+    public DateTimeOffset? LayoutExtractedAt { get; set; }
+    public int? LayoutPageCount { get; set; }
 }
 
 public static class ComplexityTierCodes

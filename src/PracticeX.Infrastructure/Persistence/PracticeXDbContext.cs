@@ -193,6 +193,9 @@ public class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : 
             entity.Property(x => x.MetadataJson).HasColumnType("jsonb");
             entity.Property(x => x.EstimatedComplexityHours).HasPrecision(8, 2);
             entity.HasIndex(x => new { x.TenantId, x.ComplexityTier });
+            entity.Property(x => x.LayoutJson).HasColumnType("jsonb");
+            entity.Property(x => x.LayoutProvider).HasMaxLength(40);
+            entity.Property(x => x.LayoutModel).HasMaxLength(80);
         });
 
         modelBuilder.Entity<DocumentCandidate>(entity =>
