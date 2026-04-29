@@ -1,12 +1,28 @@
+using Microsoft.AspNetCore.Http.Features;
 using PracticeX.Api.SourceDiscovery;
 using PracticeX.Infrastructure;
 using PracticeX.Infrastructure.Persistence;
 using PracticeX.Infrastructure.Tenancy;
+using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// Real customer document drops can be >100MB for a folder of leases + scans.
+// 256MB ceiling is comfortable for current expectations; revisit if we ever
+// see a single bundle over that.
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = 256L * 1024 * 1024;
+    options.ValueLengthLimit = int.MaxValue;
+    options.MultipartHeadersLengthLimit = int.MaxValue;
+});
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 256L * 1024 * 1024;
+});
 
 builder.Services.AddCors(options =>
 {
@@ -23,10 +39,36 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.MapScalarApiReference(options =>
+    {
+        options.Title = "PracticeX Command Center API";
+        options.Theme = ScalarTheme.BluePlanet;
+    });
 }
 
 app.UseCors("CommandCenter");
 app.UseHttpsRedirection();
+
+// Friendly root - point devs at the docs instead of returning 404.
+app.MapGet("/", () => Results.Content(
+    """
+    <!DOCTYPE html>
+    <html><head><title>PracticeX Command Center API</title>
+    <style>body{font-family:system-ui,sans-serif;max-width:640px;margin:4rem auto;padding:0 1.5rem;color:#111}
+    code{background:#f4f4f4;padding:.1em .3em;border-radius:3px}
+    a{color:#2563eb}</style></head>
+    <body>
+    <h1>PracticeX Command Center API</h1>
+    <p>The API is running. This host serves JSON endpoints; the UI lives on a separate origin.</p>
+    <ul>
+      <li><a href="/scalar/v1">Interactive API docs (Scalar)</a></li>
+      <li><a href="/openapi/v1.json">Raw OpenAPI document</a></li>
+      <li><a href="/api/system/info">/api/system/info</a> - quick health probe</li>
+      <li><a href="/api/sources/connectors">/api/sources/connectors</a> - registered source connectors</li>
+    </ul>
+    <p>Frontend: <a href="http://localhost:5173/">http://localhost:5173/</a></p>
+    </body></html>
+    """, "text/html"));
 
 app.MapGet("/api/system/info", () => Results.Ok(new
 {
