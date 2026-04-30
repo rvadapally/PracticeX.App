@@ -18,8 +18,10 @@ public sealed class OpenRouterOptions
     /// <summary>Default model slug (e.g. "anthropic/claude-haiku-4-5", "openai/gpt-5-haiku").</summary>
     public string DefaultModel { get; set; } = "anthropic/claude-haiku-4-5";
 
-    /// <summary>Per-call timeout in seconds.</summary>
-    public int TimeoutSeconds { get; set; } = 90;
+    /// <summary>Per-call timeout in seconds. Stage-1 narrative briefs on large
+    /// docs (~30K chars input, ~4K tokens out at temp 0.3) routinely exceed
+    /// 90s on Sonnet 4.6; default raised to keep the corpus batch reliable.</summary>
+    public int TimeoutSeconds { get; set; } = 240;
 
     /// <summary>Optional HTTP-Referer + X-Title headers for OpenRouter telemetry / leaderboard credit.</summary>
     public string AppName { get; set; } = "PracticeX Command Center";
