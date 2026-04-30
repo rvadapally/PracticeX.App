@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button, Card, ConfidenceBar, StatusChip } from '@practicex/design-system';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   analysisApi,
   type DocumentDetail,
   type ExtractedField,
   readableCandidateType,
 } from '../lib/api';
+
+type RightPaneTab = 'brief' | 'fields';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
 
@@ -18,6 +22,7 @@ type LoadState =
 export function DocumentDetailPage() {
   const { assetId } = useParams<{ assetId: string }>();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  const [tab, setTab] = useState<RightPaneTab>('brief');
 
   useEffect(() => {
     if (!assetId) return;
@@ -124,36 +129,136 @@ export function DocumentDetailPage() {
           )}
         </Card>
 
-        <Card
-          eyebrow={hasLlm ? `LLM extracted · ${detail.llmModel ?? ''}` : 'Regex extracted (v1)'}
-          title={`Extracted fields · ${fields.length}`}
-          className="document-fields-card">
-          {fields.length === 0 ? (
-            <div className="muted">
-              No structured fields extracted.{' '}
-              {detail.extractionStatus === 'no_extractor'
-                ? "We don't yet have an extractor for this contract type."
-                : 'Try processing again or check that the layout extraction succeeded.'}
-            </div>
-          ) : (
-            <div className="field-grid">
-              {fields.map((f) => (
-                <FieldRow key={f.name} field={f} />
-              ))}
-            </div>
-          )}
-          {detail.extractedFields?.reasonCodes && detail.extractedFields.reasonCodes.length > 0 ? (
-            <div style={{ marginTop: 16 }}>
-              <div className="eyebrow" style={{ fontSize: 11 }}>Reasoning</div>
-              <div className="reason-codes">
-                {detail.extractedFields.reasonCodes.map((rc) => (
-                  <span key={rc} className="reason-pill">{rc}</span>
-                ))}
-              </div>
-            </div>
-          ) : null}
+        <Card className="document-fields-card" style={{ padding: 0 }}>
+          <RightPaneTabs
+            tab={tab}
+            onTabChange={setTab}
+            hasBrief={!!detail.narrativeBriefMd}
+            briefModel={detail.narrativeModel}
+            briefAt={detail.narrativeExtractedAt}
+            hasLlm={hasLlm}
+            fieldCount={fields.length}
+          />
+          <div className="right-pane-body">
+            {tab === 'brief' ? (
+              <BriefPane detail={detail} />
+            ) : (
+              <FieldsPane detail={detail} fields={fields} hasLlm={hasLlm} />
+            )}
+          </div>
         </Card>
       </section>
+    </div>
+  );
+}
+
+function RightPaneTabs({
+  tab,
+  onTabChange,
+  hasBrief,
+  briefModel,
+  briefAt,
+  hasLlm,
+  fieldCount,
+}: {
+  tab: RightPaneTab;
+  onTabChange: (t: RightPaneTab) => void;
+  hasBrief: boolean;
+  briefModel: string | null;
+  briefAt: string | null;
+  hasLlm: boolean;
+  fieldCount: number;
+}) {
+  return (
+    <div className="right-pane-tabs">
+      <button
+        className={`right-pane-tab ${tab === 'brief' ? 'is-active' : ''}`}
+        onClick={() => onTabChange('brief')}
+      >
+        <span className="right-pane-tab-label">Intelligence Brief</span>
+        {hasBrief ? (
+          <span className="right-pane-tab-meta">
+            {briefModel?.split('/').pop() ?? 'authored'} ·{' '}
+            {briefAt ? new Date(briefAt).toLocaleDateString() : '—'}
+          </span>
+        ) : (
+          <span className="right-pane-tab-meta muted">not yet generated</span>
+        )}
+      </button>
+      <button
+        className={`right-pane-tab ${tab === 'fields' ? 'is-active' : ''}`}
+        onClick={() => onTabChange('fields')}
+      >
+        <span className="right-pane-tab-label">Extracted Fields</span>
+        <span className="right-pane-tab-meta">
+          {fieldCount > 0 ? `${fieldCount} fields` : 'none yet'}
+          {hasLlm ? ' · LLM' : ''}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function BriefPane({ detail }: { detail: DocumentDetail }) {
+  if (!detail.narrativeBriefMd) {
+    return (
+      <div className="muted brief-empty">
+        <div style={{ fontSize: 14, marginBottom: 8 }}>
+          No Intelligence Brief yet for this document.
+        </div>
+        <div style={{ fontSize: 13 }}>
+          Click <strong>Refine with LLM</strong> above to generate a sectioned narrative brief
+          authored in the voice of a senior healthcare attorney. The brief covers parties,
+          economic terms, risk flags, renewal cues, and a plain-English summary.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <article className="brief-prose">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.narrativeBriefMd}</ReactMarkdown>
+    </article>
+  );
+}
+
+function FieldsPane({
+  detail,
+  fields,
+  hasLlm,
+}: {
+  detail: DocumentDetail;
+  fields: ExtractedField[];
+  hasLlm: boolean;
+}) {
+  return (
+    <div className="fields-pane">
+      <div className="eyebrow" style={{ marginBottom: 12, fontSize: 11 }}>
+        {hasLlm ? `LLM extracted · ${detail.llmModel ?? ''}` : 'Regex extracted (v1)'}
+      </div>
+      {fields.length === 0 ? (
+        <div className="muted">
+          No structured fields extracted.{' '}
+          {detail.extractionStatus === 'no_extractor'
+            ? "We don't yet have an extractor for this contract type."
+            : 'Try processing again or check that the layout extraction succeeded.'}
+        </div>
+      ) : (
+        <div className="field-grid">
+          {fields.map((f) => (
+            <FieldRow key={f.name} field={f} />
+          ))}
+        </div>
+      )}
+      {detail.extractedFields?.reasonCodes && detail.extractedFields.reasonCodes.length > 0 ? (
+        <div style={{ marginTop: 16 }}>
+          <div className="eyebrow" style={{ fontSize: 11 }}>Reasoning</div>
+          <div className="reason-codes">
+            {detail.extractedFields.reasonCodes.map((rc) => (
+              <span key={rc} className="reason-pill">{rc}</span>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

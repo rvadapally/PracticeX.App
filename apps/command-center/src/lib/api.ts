@@ -345,6 +345,9 @@ export interface DocumentDetail {
   } | null;
   llmModel: string | null;
   llmExtractedAt: string | null;
+  narrativeBriefMd: string | null;
+  narrativeModel: string | null;
+  narrativeExtractedAt: string | null;
   createdAt: string;
 }
 
