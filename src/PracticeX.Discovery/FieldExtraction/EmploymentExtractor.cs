@@ -147,12 +147,18 @@ public sealed class EmploymentExtractor : IContractFieldExtractor
             return EmploymentSchemaV1Constants.Subtypes.AdvisorAgreement;
         if (body.Contains("Confidential Information and Invention Assignment", StringComparison.OrdinalIgnoreCase))
             return EmploymentSchemaV1Constants.Subtypes.Ciia;
-        if (body.Contains("HIPAA", StringComparison.OrdinalIgnoreCase) ||
-            body.Contains("Protected Health Information", StringComparison.OrdinalIgnoreCase))
+        // PHI agreements have a definitive structure. Don't trigger on generic
+        // HIPAA mentions inside offer letters or compliance boilerplate —
+        // require either the BAA title phrase or a defined-term party label.
+        if (PhiStructuralRegex.IsMatch(body))
             return EmploymentSchemaV1Constants.Subtypes.PhiAgreement;
 
         return EmploymentSchemaV1Constants.Subtypes.AdvisorAgreement;
     }
+
+    private static readonly Regex PhiStructuralRegex = new(
+        @"Business\s+Associate\s+Agreement|\(\s*""?\s*Business\s+Associate\s*""?\s*\)|\(\s*""?\s*Covered\s+Entity\s*""?\s*\)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex EffectiveDateRegex = new(
         @"(?<lead>Effective Date:?\s+|effective as of\s+|dated\s+)(?<value>[A-Z][a-z]+\s+\d{1,2},?\s+\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}|_{3,}|\[[^\]]+\])",

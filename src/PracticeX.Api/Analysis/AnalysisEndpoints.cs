@@ -395,11 +395,12 @@ public static class AnalysisEndpoints
             .ToListAsync(cancellationToken);
 
         var addressByDoc = new Dictionary<string, string>();
-        decimal totalSqft = 0m;
+        // (normalized "address|suite") -> max sqft seen. Amendments often
+        // expand a suite (e.g. 5,000 -> 8,000 sqft); summing every amendment's
+        // value triple-counts the same physical space. Keep the largest.
+        var sqftBySuite = new Dictionary<string, decimal>();
         var amendmentChains = new Dictionary<string, List<string>>();
-        var landlords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var tenants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var counterparties = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var entities = new EntityRegistry();
 
         var sourceNames = await db.SourceObjects
             .Where(s => s.TenantId == userContext.TenantId)
@@ -417,7 +418,7 @@ public static class AnalysisEndpoints
                 {
                     using var doc = JsonDocument.Parse(asset.LlmExtractedFieldsJson);
                     var root = doc.RootElement;
-                    AbsorbLlmInsights(root, docName, landlords, tenants, counterparties, ref totalSqft, addressByDoc, amendmentChains);
+                    AbsorbLlmInsights(root, docName, entities, sqftBySuite, addressByDoc, amendmentChains);
                     continue;  // LLM data wins, skip regex for this doc
                 }
                 catch { /* fall through to regex */ }
@@ -429,16 +430,22 @@ public static class AnalysisEndpoints
                 using var doc = JsonDocument.Parse(asset.ExtractedFieldsJson);
                 var root = doc.RootElement;
                 if (!root.TryGetProperty("fields", out var fields)) continue;
-                AbsorbRegexInsights(fields, docName, landlords, tenants, counterparties, ref totalSqft, addressByDoc, amendmentChains);
+                AbsorbRegexInsights(fields, docName, entities, sqftBySuite, addressByDoc, amendmentChains);
             }
             catch { /* skip malformed */ }
         }
 
+        var totalSqft = sqftBySuite.Values.Sum();
+        var landlordList = entities.Landlords();
+        var tenantList = entities.Tenants();
+        // Counterparties already shown as landlord or tenant are noise.
+        var counterpartyList = entities.Counterparties(excludeKeys: entities.PrincipalKeys());
+
         return TypedResults.Ok(new CrossDocumentInsights(
             TotalRentableSqft: totalSqft > 0 ? totalSqft : null,
-            UniqueLandlords: landlords.OrderBy(s => s).ToList(),
-            UniqueTenants: tenants.OrderBy(s => s).ToList(),
-            UniqueCounterparties: counterparties.OrderBy(s => s).ToList(),
+            UniqueLandlords: landlordList,
+            UniqueTenants: tenantList,
+            UniqueCounterparties: counterpartyList,
             AmendmentChains: amendmentChains
                 .Select(kvp => new AmendmentChain(kvp.Key, kvp.Value))
                 .OrderByDescending(c => c.Amendments.Count)
@@ -450,40 +457,33 @@ public static class AnalysisEndpoints
     private static void AbsorbLlmInsights(
         JsonElement root,
         string docName,
-        HashSet<string> landlords,
-        HashSet<string> tenants,
-        HashSet<string> counterparties,
-        ref decimal totalSqft,
+        EntityRegistry entities,
+        Dictionary<string, decimal> sqftBySuite,
         Dictionary<string, string> addressByDoc,
         Dictionary<string, List<string>> amendmentChains)
     {
         // Lease family: top-level landlord / tenant / premises[].
         if (root.TryGetProperty("landlord", out var landlord) && landlord.ValueKind == JsonValueKind.String)
         {
-            var s = landlord.GetString();
-            if (!string.IsNullOrWhiteSpace(s)) landlords.Add(s!);
+            entities.AddLandlord(landlord.GetString());
         }
         if (root.TryGetProperty("tenant", out var tenant) && tenant.ValueKind == JsonValueKind.String)
         {
-            var s = tenant.GetString();
-            if (!string.IsNullOrWhiteSpace(s)) tenants.Add(s!);
+            entities.AddTenant(tenant.GetString());
         }
         if (root.TryGetProperty("premises", out var premises) && premises.ValueKind == JsonValueKind.Array)
         {
             foreach (var p in premises.EnumerateArray())
             {
-                if (p.TryGetProperty("rentable_square_feet", out var sqEl) &&
-                    sqEl.ValueKind == JsonValueKind.Number &&
-                    sqEl.TryGetDecimal(out var sq))
-                {
-                    totalSqft += sq;
-                }
-                if (p.TryGetProperty("street_address", out var stEl) &&
-                    stEl.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(stEl.GetString()))
-                {
-                    addressByDoc[docName] = stEl.GetString()!;
-                }
+                var sqft = p.TryGetProperty("rentable_square_feet", out var sqEl) &&
+                           sqEl.ValueKind == JsonValueKind.Number &&
+                           sqEl.TryGetDecimal(out var sq) ? sq : 0m;
+                var street = p.TryGetProperty("street_address", out var stEl) &&
+                             stEl.ValueKind == JsonValueKind.String ? stEl.GetString() : null;
+                var suite = p.TryGetProperty("suite", out var suEl) &&
+                            suEl.ValueKind == JsonValueKind.String ? suEl.GetString() : null;
+                RecordSuiteSqft(sqftBySuite, street, suite, docName, sqft);
+                if (!string.IsNullOrWhiteSpace(street)) addressByDoc[docName] = street!;
             }
         }
 
@@ -506,11 +506,9 @@ public static class AnalysisEndpoints
         {
             foreach (var party in parties.EnumerateArray())
             {
-                if (party.TryGetProperty("name", out var nm) &&
-                    nm.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(nm.GetString()))
+                if (party.TryGetProperty("name", out var nm) && nm.ValueKind == JsonValueKind.String)
                 {
-                    counterparties.Add(nm.GetString()!);
+                    entities.AddCounterparty(nm.GetString());
                 }
             }
         }
@@ -519,10 +517,8 @@ public static class AnalysisEndpoints
     private static void AbsorbRegexInsights(
         JsonElement fields,
         string docName,
-        HashSet<string> landlords,
-        HashSet<string> tenants,
-        HashSet<string> counterparties,
-        ref decimal totalSqft,
+        EntityRegistry entities,
+        Dictionary<string, decimal> sqftBySuite,
         Dictionary<string, string> addressByDoc,
         Dictionary<string, List<string>> amendmentChains)
     {
@@ -537,19 +533,18 @@ public static class AnalysisEndpoints
                 {
                     var sqft = p.TryGetProperty("RentableSquareFeet", out var s) && s.TryGetDecimal(out var sd) ? sd : 0m;
                     var street = p.TryGetProperty("StreetAddress", out var st) ? st.GetString() : null;
-                    totalSqft += sqft;
+                    var suite = p.TryGetProperty("Suite", out var su) ? su.GetString() : null;
+                    RecordSuiteSqft(sqftBySuite, street, suite, docName, sqft);
                     if (!string.IsNullOrWhiteSpace(street)) addressByDoc[docName] = street!;
                 }
             }
             else if (name == "landlord" && v.ValueKind == JsonValueKind.String)
             {
-                var s = v.GetString();
-                if (!string.IsNullOrWhiteSpace(s)) landlords.Add(s!);
+                entities.AddLandlord(v.GetString());
             }
             else if (name == "tenant" && v.ValueKind == JsonValueKind.String)
             {
-                var s = v.GetString();
-                if (!string.IsNullOrWhiteSpace(s)) tenants.Add(s!);
+                entities.AddTenant(v.GetString());
             }
             else if (name == "amends" && v.ValueKind == JsonValueKind.Object)
             {
@@ -569,9 +564,167 @@ public static class AnalysisEndpoints
                 foreach (var party in v.EnumerateArray())
                 {
                     var partyName = party.TryGetProperty("Name", out var pn) ? pn.GetString() : null;
-                    if (!string.IsNullOrWhiteSpace(partyName)) counterparties.Add(partyName!);
+                    entities.AddCounterparty(partyName);
                 }
             }
+        }
+    }
+
+    private static void RecordSuiteSqft(
+        Dictionary<string, decimal> sqftBySuite,
+        string? street,
+        string? suite,
+        string docName,
+        decimal sqft)
+    {
+        if (sqft <= 0m) return;
+        // Build a stable key per physical space. Fall back to docName when we
+        // have no address (a worst-case the LLM didn't surface), so at least
+        // we don't merge two addressless leases into one bucket.
+        var addr = (street ?? "").Trim().ToLowerInvariant();
+        var ste = (suite ?? "").Trim().ToLowerInvariant();
+        var key = !string.IsNullOrEmpty(addr)
+            ? $"{addr}|{ste}"
+            : $"_doc:{docName}|{ste}";
+        // Take the max — amendments expand suites, they don't add new ones.
+        if (!sqftBySuite.TryGetValue(key, out var prior) || sqft > prior)
+        {
+            sqftBySuite[key] = sqft;
+        }
+    }
+
+    /// <summary>
+    /// Collects entity strings (landlord / tenant / counterparty) and collapses
+    /// case + punctuation + entity-suffix variants under a single canonical
+    /// display name. "Eagle Physicians, P.A." / "EAGLE PHYSICIANS AND
+    /// ASSOCIATES, PA" / "Eagle Physicians and Associates, P.A." normalize to
+    /// the same key; we keep the longest variant as the display label.
+    /// </summary>
+    private sealed class EntityRegistry
+    {
+        private readonly Dictionary<string, string> _landlords = new();
+        private readonly Dictionary<string, string> _tenants = new();
+        private readonly Dictionary<string, string> _counterparties = new();
+
+        public void AddLandlord(string? raw) => Add(_landlords, raw);
+        public void AddTenant(string? raw) => Add(_tenants, raw);
+        public void AddCounterparty(string? raw) => Add(_counterparties, raw);
+
+        public IReadOnlyList<string> Landlords() =>
+            _landlords.Values.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+
+        public IReadOnlyList<string> Tenants() =>
+            _tenants.Values.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+
+        public IReadOnlyList<string> Counterparties(IReadOnlySet<string> excludeKeys) =>
+            _counterparties
+                .Where(kvp => !MatchesAnyPrincipal(kvp.Key, excludeKeys))
+                .Select(kvp => kvp.Value)
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        public IReadOnlySet<string> PrincipalKeys()
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var k in _landlords.Keys) set.Add(k);
+            foreach (var k in _tenants.Keys) set.Add(k);
+            return set;
+        }
+
+        private static bool MatchesAnyPrincipal(string counterpartyKey, IReadOnlySet<string> principals)
+        {
+            foreach (var p in principals)
+            {
+                if (p == counterpartyKey) return true;
+                if (IsTokenPrefix(p, counterpartyKey)) return true;
+                if (IsTokenPrefix(counterpartyKey, p)) return true;
+            }
+            return false;
+        }
+
+        private static void Add(Dictionary<string, string> bucket, string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return;
+            var display = raw.Trim();
+            var key = Normalize(display);
+            if (string.IsNullOrEmpty(key)) return;
+
+            // Prefix-merge: "eagle physicians" and "eagle physicians associates"
+            // refer to the same entity; collapse onto the longer key.
+            string? mergedFromExisting = null;
+            foreach (var existingKey in bucket.Keys.ToList())
+            {
+                if (existingKey == key) break;
+                if (IsTokenPrefix(existingKey, key))
+                {
+                    // New key extends existing — promote new key, drop short one.
+                    mergedFromExisting = existingKey;
+                    break;
+                }
+                if (IsTokenPrefix(key, existingKey))
+                {
+                    // Existing key already covers new key — fold into it.
+                    var existingDisplay = bucket[existingKey];
+                    if (display.Length > existingDisplay.Length)
+                    {
+                        bucket[existingKey] = display;
+                    }
+                    return;
+                }
+            }
+            if (mergedFromExisting is not null)
+            {
+                var displaced = bucket[mergedFromExisting];
+                bucket.Remove(mergedFromExisting);
+                if (displaced.Length > display.Length) display = displaced;
+            }
+
+            if (!bucket.TryGetValue(key, out var existing) || display.Length > existing.Length)
+            {
+                bucket[key] = display;
+            }
+        }
+
+        private static bool IsTokenPrefix(string shorter, string longer)
+        {
+            if (shorter.Length >= longer.Length) return false;
+            return longer.StartsWith(shorter + " ", StringComparison.Ordinal);
+        }
+
+        private static readonly string[] EntitySuffixes =
+        {
+            "p a", "pa", "pllc", "llc", "lp", "llp", "inc", "incorporated",
+            "corp", "corporation", "co", "ltd", "limited", "the"
+        };
+
+        public static string Normalize(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            // Lowercase, strip punctuation, collapse whitespace.
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (var ch in s)
+            {
+                if (char.IsLetterOrDigit(ch)) sb.Append(char.ToLowerInvariant(ch));
+                else if (char.IsWhiteSpace(ch) || ch == '-' || ch == '&' || ch == '/' || ch == '.' || ch == ',')
+                    sb.Append(' ');
+            }
+            var collapsed = System.Text.RegularExpressions.Regex.Replace(sb.ToString(), @"\s+", " ").Trim();
+            // Tokenize, drop entity suffixes and the conjunction "and".
+            var tokens = collapsed.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(t => t != "and")
+                .ToList();
+            // Remove trailing entity suffixes (one or two tokens).
+            while (tokens.Count > 0 && EntitySuffixes.Contains(tokens[^1]))
+            {
+                tokens.RemoveAt(tokens.Count - 1);
+            }
+            // Catch "p a" as a two-token suffix.
+            if (tokens.Count >= 2 && tokens[^2] == "p" && tokens[^1] == "a")
+            {
+                tokens.RemoveAt(tokens.Count - 1);
+                tokens.RemoveAt(tokens.Count - 1);
+            }
+            return string.Join(' ', tokens);
         }
     }
 
