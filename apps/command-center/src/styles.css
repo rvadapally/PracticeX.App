@@ -885,4 +885,40 @@ select {
   /* fields pane was previously the whole card body — migrate styling here */
 }
 
+/* Slice 16.6 — Practice Intelligence Brief card on PortfolioPage */
+
+.portfolio-brief-card {
+  margin-bottom: 24px;
+}
+
+.portfolio-brief-prose {
+  max-width: 880px;
+  font-size: 14.5px;
+  line-height: 1.7;
+}
+
+.portfolio-brief-prose h1 {
+  font-size: 24px;
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.portfolio-brief-prose h2 {
+  margin-top: 28px;
+  font-size: 14px;
+}
+
+.portfolio-brief-prose h3 {
+  margin-top: 16px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--px-text-2, #555);
+}
+
+.portfolio-brief-prose hr {
+  border: none;
+  border-top: 1px solid var(--px-line-2);
+  margin: 18px 0;
+}
+
 

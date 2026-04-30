@@ -30,6 +30,8 @@ public static class PromptLoader
     public static string LoadStage2(string candidateType) =>
         Load($"Stage2_{ResolveFamily(candidateType)}");
 
+    public static string LoadStage3() => Load("Stage3_Portfolio");
+
     private static string Load(string baseName)
     {
         return _cache.GetOrAdd(baseName, name =>

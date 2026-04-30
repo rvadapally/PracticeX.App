@@ -414,6 +414,16 @@ export interface Facility {
   status: string;
 }
 
+export interface PortfolioBrief {
+  briefMd: string;
+  model: string | null;
+  sourceDocCount: number;
+  tokensIn: number;
+  tokensOut: number;
+  latencyMs: number;
+  generatedAt: string;
+}
+
 export const analysisApi = {
   getPortfolio: () => request<Portfolio>('/analysis/portfolio'),
   getInsights: () => request<PortfolioInsights>('/analysis/insights'),
@@ -426,6 +436,9 @@ export const analysisApi = {
     request<LlmExtractionResult>(`/analysis/documents/${assetId}/llm-extract`, { method: 'POST' }),
   llmExtractBatch: (force = false) =>
     request<BatchExtractionResult>(`/analysis/llm-extract-batch${force ? '?force=true' : ''}`, { method: 'POST' }),
+  getPortfolioBrief: () => request<PortfolioBrief>('/analysis/portfolio-brief'),
+  generatePortfolioBrief: () =>
+    request<PortfolioBrief>('/analysis/portfolio-brief', { method: 'POST' }),
 };
 
 export interface BatchExtractionResult {

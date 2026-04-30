@@ -22,6 +22,7 @@ public class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : 
     public DbSet<IngestionJob> IngestionJobs => Set<IngestionJob>();
     public DbSet<DocumentAsset> DocumentAssets => Set<DocumentAsset>();
     public DbSet<DocumentCandidate> DocumentCandidates => Set<DocumentCandidate>();
+    public DbSet<PortfolioBrief> PortfolioBriefs => Set<PortfolioBrief>();
     public DbSet<Counterparty> Counterparties => Set<Counterparty>();
     public DbSet<ContractRecord> Contracts => Set<ContractRecord>();
     public DbSet<ContractField> ContractFields => Set<ContractField>();
@@ -229,6 +230,14 @@ public class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : 
             entity.Property(x => x.ClassifierVersion).HasMaxLength(40).IsRequired();
             entity.Property(x => x.OriginFilename).HasMaxLength(512);
             entity.Property(x => x.RelativePath).HasMaxLength(1024);
+        });
+
+        modelBuilder.Entity<PortfolioBrief>(entity =>
+        {
+            entity.ToTable("portfolio_briefs", "doc");
+            entity.HasKey(x => x.TenantId);
+            entity.Property(x => x.BriefMd).HasColumnType("text").IsRequired();
+            entity.Property(x => x.Model).HasMaxLength(120);
         });
     }
 

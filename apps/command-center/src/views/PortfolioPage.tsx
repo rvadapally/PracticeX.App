@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Card, KpiCard, StatusChip } from '@practicex/design-system';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   analysisApi,
   type BatchExtractionResult,
   type Portfolio,
+  type PortfolioBrief as PortfolioBriefDto,
   type PortfolioFamily,
   type PortfolioDocument,
   type PortfolioInsights,
@@ -144,6 +147,8 @@ export function PortfolioPage() {
           helper={`${insights.uniqueLandlords.length} landlords · ${insights.uniqueTenants.length} tenants`}
         />
       </section>
+
+      <PortfolioBriefSection />
 
       <section className="family-grid">
         {portfolio.families.map((family) => (
@@ -324,5 +329,129 @@ function InsightsPanel({ insights }: { insights: PortfolioInsights }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+type BriefState =
+  | { kind: 'loading' }
+  | { kind: 'absent' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; brief: PortfolioBriefDto };
+
+function PortfolioBriefSection() {
+  const [state, setState] = useState<BriefState>({ kind: 'loading' });
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const brief = await analysisApi.getPortfolioBrief();
+        if (!cancelled) setState({ kind: 'ready', brief });
+      } catch (err) {
+        if (cancelled) return;
+        const status = (err as { status?: number } | undefined)?.status;
+        if (status === 404) setState({ kind: 'absent' });
+        else setState({ kind: 'error', message: 'Failed to load Practice Intelligence Brief.' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function generate() {
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const brief = await analysisApi.generatePortfolioBrief();
+      setState({ kind: 'ready', brief });
+    } catch (err) {
+      const detail = (err as { detail?: string } | undefined)?.detail;
+      setGenError(detail ?? 'Failed to generate brief.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  if (state.kind === 'loading') {
+    return null;
+  }
+
+  if (state.kind === 'absent') {
+    return (
+      <section className="portfolio-brief-card">
+        <Card
+          eyebrow="Premium · Cross-document synthesis"
+          title="Practice Intelligence Brief"
+          actions={
+            <Button onClick={generate} disabled={generating}>
+              {generating ? 'Synthesizing across portfolio…' : 'Generate brief'}
+            </Button>
+          }
+        >
+          <div className="muted" style={{ fontSize: 14, lineHeight: 1.6 }}>
+            Synthesize all per-document briefs into a single executive Practice
+            Intelligence Brief — landlord concentration, lease expiry waterfall,
+            workforce posture, strategic counterparties, compliance gaps, top 5
+            risks, top 5 recommended actions, and a 90-day calendar of triggers
+            and deadlines. The view a senior partner uses to walk into a board
+            meeting.
+          </div>
+          {genError ? (
+            <div className="banner banner-error" style={{ marginTop: 12 }}>{genError}</div>
+          ) : null}
+        </Card>
+      </section>
+    );
+  }
+
+  if (state.kind === 'error') {
+    return (
+      <section className="portfolio-brief-card">
+        <div className="banner banner-error">{state.message}</div>
+      </section>
+    );
+  }
+
+  const { brief } = state;
+  const generatedDate = new Date(brief.generatedAt).toLocaleString();
+  const cost = ((brief.tokensIn + brief.tokensOut) / 1_000_000) * 3;
+
+  return (
+    <section className="portfolio-brief-card">
+      <Card
+        eyebrow={`Premium · synthesized from ${brief.sourceDocCount} documents · ${brief.model?.split('/').pop() ?? 'authored'}`}
+        title="Practice Intelligence Brief"
+        actions={
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {generatedDate} · ${cost.toFixed(2)}
+            </span>
+            <Button variant="secondary" onClick={() => setCollapsed((c) => !c)}>
+              {collapsed ? 'Expand' : 'Collapse'}
+            </Button>
+            <Button onClick={generate} disabled={generating} variant="secondary">
+              {generating ? 'Regenerating…' : 'Regenerate'}
+            </Button>
+          </div>
+        }
+      >
+        {genError ? (
+          <div className="banner banner-error" style={{ marginBottom: 12 }}>{genError}</div>
+        ) : null}
+        {!collapsed ? (
+          <article className="brief-prose portfolio-brief-prose">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{brief.briefMd}</ReactMarkdown>
+          </article>
+        ) : (
+          <div className="muted" style={{ fontSize: 13 }}>
+            Brief is collapsed. Click Expand to read the full {brief.briefMd.length.toLocaleString()}-character synthesis.
+          </div>
+        )}
+      </Card>
+    </section>
   );
 }
