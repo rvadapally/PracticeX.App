@@ -72,6 +72,28 @@ export const onRequest: PagesFunction<ProxyEnv> = async ({ request, env }) => {
   respHeaders.delete('nel');
   respHeaders.delete('report-to');
 
+  // For text/JSON responses, buffer fully and re-emit as ArrayBuffer with an
+  // explicit Content-Length. iPad Safari was emitting "Load failed" on the
+  // 30KB+ portfolio-brief response when we passed `response.body` through as
+  // a stream — buffering eliminates whatever Content-Length / chunked-encoding
+  // quirk Cloudflare's Pages runtime introduces between the upstream and the
+  // browser. PDFs and other binary still stream.
+  const ct = (response.headers.get('content-type') || '').toLowerCase();
+  const shouldBuffer =
+    ct.includes('application/json') ||
+    ct.includes('text/') ||
+    ct.includes('application/problem+json');
+
+  if (shouldBuffer) {
+    const buf = await response.arrayBuffer();
+    respHeaders.set('content-length', String(buf.byteLength));
+    return new Response(buf, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: respHeaders,
+    });
+  }
+
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
