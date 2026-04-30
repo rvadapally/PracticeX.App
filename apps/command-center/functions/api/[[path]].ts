@@ -72,6 +72,22 @@ export const onRequest: PagesFunction<ProxyEnv> = async ({ request, env }) => {
   respHeaders.delete('nel');
   respHeaders.delete('report-to');
 
+  // Stamp explicit CORS headers. This is technically a same-origin proxy
+  // (browser at app.practicex.ai fetching app.practicex.ai/api/*) but the
+  // OTP-authenticated Cloudflare Access path appears to mark the response
+  // in a way that browsers treat as cross-origin for fetch() — empirically,
+  // direct address-bar navigation succeeds while the React fetch fails
+  // with "Load failed" (Safari) / "Failed to fetch" (Chrome/Firefox), all
+  // of which are silent CORS-block error patterns. Adding the explicit
+  // headers makes the check pass unconditionally. Service-token-auth path
+  // doesn't have this problem, which is why our Playwright probes worked.
+  const reqOrigin = request.headers.get('origin');
+  if (reqOrigin) {
+    respHeaders.set('access-control-allow-origin', reqOrigin);
+    respHeaders.set('access-control-allow-credentials', 'true');
+    respHeaders.set('vary', 'origin');
+  }
+
   // For text/JSON responses, buffer fully and re-emit as ArrayBuffer with an
   // explicit Content-Length. iPad Safari was emitting "Load failed" on the
   // 30KB+ portfolio-brief response when we passed `response.body` through as
