@@ -339,7 +339,22 @@ export interface DocumentDetail {
     fields: ExtractedField[];
     reasonCodes: string[];
   } | null;
+  llmExtractedFields: {
+    fields: ExtractedField[];
+    reasonCodes: string[];
+  } | null;
+  llmModel: string | null;
+  llmExtractedAt: string | null;
   createdAt: string;
+}
+
+export interface LlmExtractionResult {
+  status: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  latencyMs: number;
+  json: string;
 }
 
 export interface AmendmentChain {
@@ -404,6 +419,8 @@ export const analysisApi = {
   getReviewQueue: () => request<ReviewQueueItem[]>('/analysis/review-queue'),
   getCurrentUser: () => request<CurrentUser>('/analysis/me'),
   getFacilities: () => request<Facility[]>('/analysis/facilities'),
+  llmExtract: (assetId: string) =>
+    request<LlmExtractionResult>(`/analysis/documents/${assetId}/llm-extract`, { method: 'POST' }),
 };
 
 export function readableRelativeTime(iso: string): string {

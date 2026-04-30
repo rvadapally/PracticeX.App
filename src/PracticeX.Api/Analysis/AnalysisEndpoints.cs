@@ -314,6 +314,24 @@ public static class AnalysisEndpoints
             catch { /* leave null on parse failure */ }
         }
 
+        // Surface LLM-extracted fields when present (Slice 13).
+        ExtractedFieldsView? llmExtractedFields = null;
+        if (!string.IsNullOrEmpty(asset.LlmExtractedFieldsJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(asset.LlmExtractedFieldsJson);
+                var fields = new List<ExtractedFieldView>();
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    var rawValue = prop.Value.ValueKind == JsonValueKind.Null ? null : prop.Value.ToString();
+                    fields.Add(new ExtractedFieldView(prop.Name, rawValue, 0.95m, null));
+                }
+                llmExtractedFields = new ExtractedFieldsView(fields, ["llm_extracted"]);
+            }
+            catch { /* leave null */ }
+        }
+
         // Pull a text snippet for the demo's "what we read" panel. Prefer
         // Doc Intel's layout fullText when it ran (best fidelity); otherwise
         // fall back to the locally-extracted text saved during ingestion
@@ -356,6 +374,9 @@ public static class AnalysisEndpoints
             LayoutPageCount: asset.LayoutPageCount,
             LayoutSnippet: layoutSnippet,
             ExtractedFields: extractedFields,
+            LlmExtractedFields: llmExtractedFields,
+            LlmModel: asset.LlmExtractorModel,
+            LlmExtractedAt: asset.LlmExtractedAt,
             CreatedAt: asset.CreatedAt
         ));
     }
@@ -540,6 +561,9 @@ public sealed record DocumentDetailResponse(
     int? LayoutPageCount,
     string? LayoutSnippet,
     ExtractedFieldsView? ExtractedFields,
+    ExtractedFieldsView? LlmExtractedFields,
+    string? LlmModel,
+    DateTimeOffset? LlmExtractedAt,
     DateTimeOffset CreatedAt);
 
 public sealed record ExtractedFieldsView(

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Card, ConfidenceBar, StatusChip } from '@practicex/design-system';
+import { Button, Card, ConfidenceBar, StatusChip } from '@practicex/design-system';
 import {
   analysisApi,
   type DocumentDetail,
@@ -50,8 +50,13 @@ export function DocumentDetailPage() {
   }
 
   const { detail } = state;
-  const fields = detail.extractedFields?.fields ?? [];
   const isPdf = !!detail.fileName && detail.fileName.toLowerCase().endsWith('.pdf');
+
+  // LLM fields take priority when present; regex stays as fallback for "show old".
+  const llmFields = detail.llmExtractedFields?.fields ?? [];
+  const regexFields = detail.extractedFields?.fields ?? [];
+  const hasLlm = llmFields.length > 0;
+  const fields = hasLlm ? llmFields : regexFields;
 
   return (
     <div className="page document-detail-page">
@@ -83,6 +88,8 @@ export function DocumentDetailPage() {
         </div>
       </header>
 
+      <LlmActionRow detail={detail} hasLlm={hasLlm} onUpdated={(d) => setState({ kind: 'ready', detail: d })} />
+
       <section className="document-split">
         <Card title="Original document" className="document-source-card">
           {sourceUrl ? (
@@ -113,7 +120,10 @@ export function DocumentDetailPage() {
           )}
         </Card>
 
-        <Card title={`Extracted fields · ${fields.length}`} className="document-fields-card">
+        <Card
+          eyebrow={hasLlm ? `LLM extracted · ${detail.llmModel ?? ''}` : 'Regex extracted (v1)'}
+          title={`Extracted fields · ${fields.length}`}
+          className="document-fields-card">
           {fields.length === 0 ? (
             <div className="muted">
               No structured fields extracted.{' '}
@@ -140,6 +150,59 @@ export function DocumentDetailPage() {
           ) : null}
         </Card>
       </section>
+    </div>
+  );
+}
+
+function LlmActionRow({
+  detail,
+  hasLlm,
+  onUpdated,
+}: {
+  detail: DocumentDetail;
+  hasLlm: boolean;
+  onUpdated: (d: DocumentDetail) => void;
+}) {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function runLlm() {
+    setRunning(true);
+    setError(null);
+    try {
+      await analysisApi.llmExtract(detail.documentAssetId);
+      const fresh = await analysisApi.getDocument(detail.documentAssetId);
+      onUpdated(fresh);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'LLM extraction failed.';
+      setError(msg);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="llm-bar">
+      <div>
+        {hasLlm ? (
+          <span>
+            <StatusChip tone="ok">LLM-refined</StatusChip>
+            <span className="muted" style={{ marginLeft: 10, fontSize: 12 }}>
+              {detail.llmModel} · {detail.llmExtractedAt ? new Date(detail.llmExtractedAt).toLocaleString() : ''}
+            </span>
+          </span>
+        ) : (
+          <span className="muted" style={{ fontSize: 13 }}>
+            Showing regex v1 extraction. LLM refinement available — typically cleaner parties / dates / rent / signers.
+          </span>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {error ? <span className="mono-label" style={{ color: 'var(--px-orange)' }}>{error}</span> : null}
+        <Button onClick={runLlm} disabled={running} variant={hasLlm ? 'secondary' : undefined}>
+          {running ? 'Running LLM…' : hasLlm ? 'Re-run LLM' : 'Refine with LLM'}
+        </Button>
+      </div>
     </div>
   );
 }

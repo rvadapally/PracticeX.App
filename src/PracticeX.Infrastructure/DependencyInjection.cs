@@ -6,11 +6,13 @@ using PracticeX.Application.SourceDiscovery.Complexity;
 using PracticeX.Application.SourceDiscovery.Connectors;
 using PracticeX.Application.SourceDiscovery.DocumentAi;
 using PracticeX.Application.SourceDiscovery.Ingestion;
+using PracticeX.Application.SourceDiscovery.Llm;
 using PracticeX.Application.SourceDiscovery.Outlook;
 using PracticeX.Application.SourceDiscovery.Storage;
 using PracticeX.Discovery.Classification;
 using PracticeX.Discovery.DocumentAi;
 using PracticeX.Discovery.FieldExtraction;
+using PracticeX.Discovery.Llm;
 using PracticeX.Discovery.Pipelines;
 using PracticeX.Discovery.Signatures;
 using PracticeX.Discovery.TextExtraction;
@@ -20,6 +22,7 @@ using PracticeX.Infrastructure.SourceDiscovery.Complexity;
 using PracticeX.Infrastructure.SourceDiscovery.Connectors;
 using PracticeX.Infrastructure.SourceDiscovery.DocumentAi;
 using PracticeX.Infrastructure.SourceDiscovery.Ingestion;
+using PracticeX.Infrastructure.SourceDiscovery.Llm;
 using PracticeX.Infrastructure.SourceDiscovery.Outlook;
 using PracticeX.Infrastructure.SourceDiscovery.Pricing;
 using PracticeX.Infrastructure.SourceDiscovery.Storage;
@@ -92,6 +95,10 @@ public static class DependencyInjection
 
         services.AddHttpClient("microsoft-graph");
         services.AddHttpClient("microsoft-graph-token");
+        services.AddHttpClient("openrouter");
+
+        services.Configure<OpenRouterOptions>(configuration.GetSection(OpenRouterOptions.SectionName));
+        services.AddSingleton<IDocumentLanguageModel, OpenRouterDocumentLanguageModel>();
 
         services.AddScoped<IMicrosoftGraphOAuthService, MicrosoftGraphOAuthService>();
         services.AddScoped<IMicrosoftGraphClient, MicrosoftGraphClient>();

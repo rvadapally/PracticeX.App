@@ -97,6 +97,7 @@ app.MapGet("/api/system/info", () => Results.Ok(new
 
 app.MapSourceDiscoveryEndpoints();
 app.MapAnalysisEndpoints();
+app.MapLlmExtractionEndpoints();
 
 // Demo seed: creates the default tenant + user the demo current-user resolver
 // expects. In production this is replaced by tenant onboarding flows.

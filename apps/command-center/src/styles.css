@@ -543,6 +543,18 @@ select {
   word-break: break-word;
 }
 
+.llm-bar {
+  align-items: center;
+  background: var(--px-bg-1);
+  border: 1px solid var(--px-line-2);
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+}
+
 .reason-codes {
   display: flex;
   flex-wrap: wrap;

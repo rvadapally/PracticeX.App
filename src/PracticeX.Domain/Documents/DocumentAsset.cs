@@ -50,6 +50,15 @@ public sealed class DocumentAsset : Entity
     // Stored so the UI's "Original document" pane can show a snippet for
     // formats the browser can't render natively (DOCX, XLSX).
     public string? ExtractedFullText { get; set; }
+
+    // Slice 13: LLM-refined field extraction. Sits alongside the regex output
+    // so we can A/B and fall back when the LLM response can't be parsed.
+    public string? LlmExtractedFieldsJson { get; set; }
+    public string? LlmExtractorModel { get; set; }
+    public DateTimeOffset? LlmExtractedAt { get; set; }
+    public int? LlmTokensIn { get; set; }
+    public int? LlmTokensOut { get; set; }
+    public string? LlmExtractionStatus { get; set; }
 }
 
 public static class ComplexityTierCodes
