@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PracticeX.Application.Common;
 using PracticeX.Application.SourceDiscovery.Storage;
 using PracticeX.Discovery.DocumentAi;
+using PracticeX.Discovery.TextExtraction;
 using PracticeX.Domain.Audit;
 using PracticeX.Infrastructure.Persistence;
 
@@ -23,7 +24,101 @@ public static class OcrReprocessEndpoint
         var group = routes.MapGroup("/api/analysis").WithTags("Analysis");
         group.MapPost("/documents/{assetId:guid}/reprocess-ocr", ReprocessOcr)
             .WithName("ReprocessOcr");
+        group.MapPost("/documents/{assetId:guid}/reprocess-text", ReprocessLocalText)
+            .WithName("ReprocessLocalText");
         return routes;
+    }
+
+    /// <summary>
+    /// Re-runs the local text extractor (PdfPig / DocxTextExtractor) on an
+    /// existing asset. Useful when the extractor has been improved (e.g.
+    /// strikethrough / tracked-change filtering for DOCX) and we want to
+    /// refresh stored full text without re-ingesting the document.
+    /// </summary>
+    private static async Task<Results<Ok<TextReprocessResult>, NotFound, BadRequest<ProblemSummary>>> ReprocessLocalText(
+        Guid assetId,
+        PracticeXDbContext db,
+        IDocumentStorage storage,
+        IDocumentTextExtractor textExtractor,
+        ICurrentUserContext userContext,
+        ILogger<Marker> logger,
+        CancellationToken cancellationToken)
+    {
+        var asset = await db.DocumentAssets
+            .FirstOrDefaultAsync(a => a.Id == assetId && a.TenantId == userContext.TenantId, cancellationToken);
+        if (asset is null) return TypedResults.NotFound();
+
+        var fileName = "(unnamed)";
+        if (asset.SourceObjectId.HasValue)
+        {
+            var src = await db.SourceObjects
+                .Where(s => s.Id == asset.SourceObjectId.Value)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(src)) fileName = src!;
+        }
+
+        if (!textExtractor.CanExtract(asset.MimeType, fileName))
+        {
+            return TypedResults.BadRequest(new ProblemSummary("unsupported",
+                $"No local text extractor for {asset.MimeType} / {fileName}."));
+        }
+
+        byte[] bytes;
+        try
+        {
+            using var stream = await storage.OpenReadAsync(asset.StorageUri, cancellationToken);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms, cancellationToken);
+            bytes = ms.ToArray();
+        }
+        catch (FileNotFoundException)
+        {
+            return TypedResults.BadRequest(new ProblemSummary("storage_missing",
+                $"Storage file not found at {asset.StorageUri}."));
+        }
+
+        try
+        {
+            var result = textExtractor.Extract(bytes, asset.MimeType, fileName);
+            var oldLen = asset.ExtractedFullText?.Length ?? 0;
+            var newText = result.FullText.Length > 256_000
+                ? result.FullText[..256_000]
+                : result.FullText;
+            asset.ExtractedFullText = newText;
+            asset.UpdatedAt = DateTimeOffset.UtcNow;
+
+            db.AuditEvents.Add(new AuditEvent
+            {
+                TenantId = userContext.TenantId,
+                ActorType = "user",
+                ActorId = userContext.UserId,
+                EventType = "ingestion.text.reprocessed",
+                ResourceType = "document_asset",
+                ResourceId = asset.Id,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    extractor = result.ExtractorName,
+                    oldChars = oldLen,
+                    newChars = newText.Length,
+                    headings = result.Headings.Count
+                }),
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            await db.SaveChangesAsync(cancellationToken);
+
+            return TypedResults.Ok(new TextReprocessResult(
+                Status: "completed",
+                Extractor: result.ExtractorName,
+                OldChars: oldLen,
+                NewChars: newText.Length,
+                Headings: result.Headings.Count));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Local text reprocess failed for asset {AssetId}", assetId);
+            return TypedResults.BadRequest(new ProblemSummary("text_extract_failed", ex.Message));
+        }
     }
 
     private static async Task<Results<Ok<OcrReprocessResult>, NotFound, BadRequest<ProblemSummary>>> ReprocessOcr(
@@ -153,3 +248,10 @@ public sealed record OcrReprocessResult(
     int PageCount,
     int TextChars,
     long LatencyMs);
+
+public sealed record TextReprocessResult(
+    string Status,
+    string Extractor,
+    int OldChars,
+    int NewChars,
+    int Headings);
