@@ -28,22 +28,32 @@ export function AppShell() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const [u, s, f] = await Promise.all([
-          analysisApi.getCurrentUser().catch(() => null),
-          analysisApi.getDashboard().catch(() => null),
-          analysisApi.getFacilities().catch(() => []),
-        ]);
-        if (cancelled) return;
-        if (u) setUser(u);
-        if (s) setStats(s);
-        if (f) setFacilities(f);
-      } catch {
-        // Sidebar gracefully degrades when API isn't reachable yet.
+      // Capture the raw errors so we can surface a diagnostic message when
+      // everything fails (e.g. API tunnel down, missing migration crash).
+      let userError: unknown = null;
+      const [u, s, f] = await Promise.all([
+        analysisApi.getCurrentUser().catch((e) => { userError = e; return null; }),
+        analysisApi.getDashboard().catch(() => null),
+        analysisApi.getFacilities().catch(() => []),
+      ]);
+      if (cancelled) return;
+      if (u) setUser(u);
+      if (s) setStats(s);
+      if (f) setFacilities(f);
+      // Surface a diagnostic when the primary user call failed.
+      if (!u && userError !== null) {
+        const err = userError;
+        const detail =
+          (err as { detail?: string })?.detail ??
+          (err as { title?: string })?.title ??
+          (err instanceof Error ? (err as Error).message : null) ??
+          `API unreachable (HTTP ${(err as { status?: number })?.status ?? 'unknown'}).`;
+        setApiError(detail);
       }
     })();
     return () => {
@@ -65,7 +75,7 @@ export function AppShell() {
 
   const userName = user?.name ?? '—';
   const userInitials = user?.initials ?? '?';
-  const tenantName = user?.tenantName ?? 'Loading…';
+  const tenantName = user?.tenantName ?? (apiError ? 'API unreachable' : 'Loading…');
 
   return (
     <div className="app" data-theme="operator" data-density="comfortable">
@@ -134,8 +144,12 @@ export function AppShell() {
         <div style={{ flex: 1 }} />
         <div className="plan-card">
           <div className="section-label" style={{ marginLeft: 0 }}>Tenant</div>
-          <strong>{tenantName}</strong>
-          {stats ? (
+          <strong style={apiError ? { color: 'var(--px-orange, #d4631e)' } : undefined}>{tenantName}</strong>
+          {apiError ? (
+            <div className="muted" style={{ marginTop: 4, fontSize: 11, lineHeight: 1.4, wordBreak: 'break-word' }}>
+              {apiError}
+            </div>
+          ) : stats ? (
             <div className="muted" style={{ marginTop: 4 }}>
               {stats.documents} docs · {stats.totalSizeMb.toFixed(1)} MB processed
             </div>

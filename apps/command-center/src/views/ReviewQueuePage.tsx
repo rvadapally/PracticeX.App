@@ -24,7 +24,12 @@ export function ReviewQueuePage() {
         if (!cancelled) setState({ kind: 'ready', items });
       } catch (err) {
         if (cancelled) return;
-        setState({ kind: 'error', message: err instanceof Error ? err.message : 'Failed to load.' });
+        const message =
+          (err as { detail?: string })?.detail ??
+          (err as { title?: string })?.title ??
+          (err instanceof Error ? err.message : null) ??
+          `Failed to load (HTTP ${(err as { status?: number })?.status ?? 'unknown'}).`;
+        setState({ kind: 'error', message });
       }
     })();
     return () => {

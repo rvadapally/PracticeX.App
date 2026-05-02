@@ -41,11 +41,36 @@ export function PortfolioPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [portfolio, insights] = await Promise.all([
+        const [portfolioResult, insightsResult] = await Promise.allSettled([
           analysisApi.getPortfolio(),
           analysisApi.getInsights(),
         ]);
         if (cancelled) return;
+
+        if (portfolioResult.status === 'rejected') {
+          const err = portfolioResult.reason;
+          const message =
+            (err as { detail?: string })?.detail ??
+            (err as { title?: string })?.title ??
+            (err instanceof Error ? err.message : null) ??
+            `Failed to load portfolio (HTTP ${(err as { status?: number })?.status ?? 'unknown'}).`;
+          setState({ kind: 'error', message });
+          return;
+        }
+
+        const portfolio = portfolioResult.value;
+        const insights =
+          insightsResult.status === 'fulfilled'
+            ? insightsResult.value
+            : {
+                totalRentableSqft: null,
+                uniqueLandlords: [],
+                uniqueTenants: [],
+                uniqueCounterparties: [],
+                amendmentChains: [],
+                documentAddresses: {},
+              };
+
         if (portfolio.totalDocuments === 0) {
           setState({ kind: 'empty' });
           return;
@@ -53,7 +78,11 @@ export function PortfolioPage() {
         setState({ kind: 'ready', portfolio, insights });
       } catch (err) {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : 'Failed to load portfolio.';
+        const message =
+          (err as { detail?: string })?.detail ??
+          (err as { title?: string })?.title ??
+          (err instanceof Error ? err.message : null) ??
+          `Failed to load portfolio (HTTP ${(err as { status?: number })?.status ?? 'unknown'}).`;
         setState({ kind: 'error', message });
       }
     })();

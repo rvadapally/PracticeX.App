@@ -50,7 +50,11 @@ export function DocumentDetailPage() {
         if (!cancelled) setState({ kind: 'ready', detail });
       } catch (err) {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : 'Failed to load document.';
+        const message =
+          (err as { detail?: string })?.detail ??
+          (err as { title?: string })?.title ??
+          (err instanceof Error ? err.message : null) ??
+          `Failed to load document (HTTP ${(err as { status?: number })?.status ?? 'unknown'}).`;
         setState({ kind: 'error', message });
       }
     })();

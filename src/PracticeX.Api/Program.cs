@@ -63,6 +63,22 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// Apply all SQL migration scripts at startup. Every script is idempotent so
+// this is safe on every restart. Uses the raw Npgsql connection rather than
+// EF Core migrations so no dotnet-ef toolchain is needed at the host.
+try
+{
+    await PracticeX.Infrastructure.Persistence.StartupMigrationRunner.RunAsync(
+        scriptAssembly: System.Reflection.Assembly.GetExecutingAssembly(),
+        configuration: app.Configuration,
+        logger: app.Logger,
+        cancellationToken: default);
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "StartupMigrationRunner failed — continuing startup. Run apply_all_migrations.sql manually if the API returns 500s.");
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

@@ -43,19 +43,27 @@ What is **not** implemented yet (per the PRD): rate intelligence, benchmarking, 
 
 ## Database setup and migration order
 
-PracticeX **does not** auto-apply migrations at startup (ADR 0005). Apply the SQL scripts in this exact order against your `practicex` database:
-
-1. `migrations/practicex_initial_enterprise_foundation.sql` — canonical schemas and tables.
-2. `migrations/20260425_source_discovery_extensions.sql` — Source Discovery additions (`source_objects`, `ingestion_batches`, candidate metadata, etc.).
-
-Both scripts are idempotent and safe to re-run. Example:
+PracticeX **does not** auto-apply migrations at startup (ADR 0005). Apply all SQL scripts against your `practicex` database before starting the API. The quickest way is the consolidated helper:
 
 ```bash
 psql "postgres://postgres:postgres@localhost:5432/practicex" \
-  -f migrations/practicex_initial_enterprise_foundation.sql
-psql "postgres://postgres:postgres@localhost:5432/practicex" \
-  -f migrations/20260425_source_discovery_extensions.sql
+  -f migrations/apply_all_migrations.sql
 ```
+
+That script sources each migration in the correct order and is safe to re-run at any time. Alternatively, apply each file manually in this exact order:
+
+1. `migrations/practicex_initial_enterprise_foundation.sql` — canonical schemas and tables.
+2. `migrations/20260425_source_discovery_extensions.sql` — Source Discovery additions (`source_objects`, `ingestion_batches`, candidate metadata, etc.).
+3. `migrations/20260426_manifest_phase_extensions.sql` — manifest-phase / bundle-upload lifecycle columns.
+4. `migrations/20260427_doc_intel_layout.sql` — Azure Document Intelligence layout columns on `document_assets`.
+5. `migrations/20260427_complexity_profiling.sql` — complexity tier, factors, and pricing columns.
+6. `migrations/20260428_extracted_fields.sql` — regex extractor output columns.
+7. `migrations/20260429_extracted_full_text.sql` — `extracted_full_text` column for UI snippet and LLM input.
+8. `migrations/20260429_llm_extracted_fields.sql` — LLM-extracted fields columns.
+9. `migrations/20260430_llm_narrative_brief.sql` — LLM narrative brief columns (stage 1 of two-pass pipeline).
+10. `migrations/20260430_portfolio_brief.sql` — `doc.portfolio_briefs` table (stage 3 portfolio rollup).
+
+All scripts are idempotent. If the API returns 500 errors immediately after startup, the most likely cause is that one or more migrations above have not been applied; run `apply_all_migrations.sql` to resolve.
 
 To generate a new EF Core migration or a deployment script, see [`docs/database-migrations.md`](docs/database-migrations.md). The history table is `audit.__ef_migrations_history`.
 

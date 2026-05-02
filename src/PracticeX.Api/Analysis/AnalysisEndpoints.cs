@@ -90,8 +90,13 @@ public static class AnalysisEndpoints
             c => c.TenantId == tenantId && c.Status == DocumentCandidateStatus.PendingReview, cancellationToken);
         var batches = await db.IngestionBatches.CountAsync(b => b.TenantId == tenantId, cancellationToken);
         var contractsTracked = await db.Contracts.CountAsync(x => x.TenantId == tenantId, cancellationToken);
-        var totalSize = await db.DocumentAssets.Where(a => a.TenantId == tenantId).SumAsync(a => (long?)a.SizeBytes, cancellationToken) ?? 0L;
-        var docIntelPages = await db.DocumentAssets.Where(a => a.TenantId == tenantId).SumAsync(a => (int?)a.LayoutPageCount, cancellationToken) ?? 0;
+
+        var totalSize = await db.DocumentAssets
+            .Where(a => a.TenantId == tenantId)
+            .SumAsync(a => (long?)a.SizeBytes, cancellationToken) ?? 0L;
+        var docIntelPages = await db.DocumentAssets
+            .Where(a => a.TenantId == tenantId)
+            .SumAsync(a => (int?)a.LayoutPageCount, cancellationToken) ?? 0;
 
         return TypedResults.Ok(new DashboardResponse(
             TenantId: tenantId,
@@ -198,17 +203,38 @@ public static class AnalysisEndpoints
         ICurrentUserContext userContext,
         CancellationToken cancellationToken)
     {
-        var assets = await db.DocumentAssets
-            .Where(a => a.TenantId == userContext.TenantId)
-            .Join(db.DocumentCandidates,
-                a => a.Id,
-                c => c.DocumentAssetId,
-                (a, c) => new { Asset = a, Candidate = c })
-            .ToListAsync(cancellationToken);
+        // Project only the columns we need so a missing migration on a new
+        // column never causes a 500 on the portfolio page. All optional
+        // columns from later slices (layout, extraction, LLM) are selected
+        // individually rather than loading the full entity.
+        var rows = await (
+            from a in db.DocumentAssets
+            join c in db.DocumentCandidates on a.Id equals c.DocumentAssetId
+            where a.TenantId == userContext.TenantId
+            select new
+            {
+                AssetId = a.Id,
+                CandidateId = c.Id,
+                a.SourceObjectId,
+                a.SizeBytes,
+                a.PageCount,
+                a.HasTextLayer,
+                a.LayoutProvider,
+                a.LayoutPageCount,
+                a.ExtractedSubtype,
+                a.ExtractedSchemaVersion,
+                a.ExtractionStatus,
+                a.ExtractedIsTemplate,
+                a.ExtractedIsExecuted,
+                a.CreatedAt,
+                c.CandidateType,
+                c.Confidence,
+            }
+        ).ToListAsync(cancellationToken);
 
-        var sourceObjectIds = assets
-            .Where(x => x.Asset.SourceObjectId.HasValue)
-            .Select(x => x.Asset.SourceObjectId!.Value)
+        var sourceObjectIds = rows
+            .Where(x => x.SourceObjectId.HasValue)
+            .Select(x => x.SourceObjectId!.Value)
             .Distinct()
             .ToList();
 
@@ -216,24 +242,24 @@ public static class AnalysisEndpoints
             .Where(s => sourceObjectIds.Contains(s.Id))
             .ToDictionaryAsync(s => s.Id, s => s.Name, cancellationToken);
 
-        var docs = assets.Select(x => new PortfolioDocument(
-            DocumentAssetId: x.Asset.Id,
-            DocumentCandidateId: x.Candidate.Id,
-            FileName: x.Asset.SourceObjectId.HasValue && sourceObjects.TryGetValue(x.Asset.SourceObjectId.Value, out var name) ? name : "(unnamed)",
-            CandidateType: x.Candidate.CandidateType,
-            Family: MapToFamily(x.Candidate.CandidateType),
-            ExtractedSubtype: x.Asset.ExtractedSubtype,
-            Confidence: x.Candidate.Confidence,
-            PageCount: x.Asset.PageCount,
-            SizeBytes: x.Asset.SizeBytes,
-            HasTextLayer: x.Asset.HasTextLayer,
-            UsedDocIntelligence: x.Asset.LayoutProvider != null,
-            LayoutPageCount: x.Asset.LayoutPageCount,
-            ExtractionStatus: x.Asset.ExtractionStatus,
-            ExtractionSchemaVersion: x.Asset.ExtractedSchemaVersion,
-            IsTemplate: x.Asset.ExtractedIsTemplate,
-            IsExecuted: x.Asset.ExtractedIsExecuted,
-            CreatedAt: x.Asset.CreatedAt
+        var docs = rows.Select(x => new PortfolioDocument(
+            DocumentAssetId: x.AssetId,
+            DocumentCandidateId: x.CandidateId,
+            FileName: x.SourceObjectId.HasValue && sourceObjects.TryGetValue(x.SourceObjectId.Value, out var name) ? name : "(unnamed)",
+            CandidateType: x.CandidateType,
+            Family: MapToFamily(x.CandidateType),
+            ExtractedSubtype: x.ExtractedSubtype,
+            Confidence: x.Confidence,
+            PageCount: x.PageCount,
+            SizeBytes: x.SizeBytes,
+            HasTextLayer: x.HasTextLayer,
+            UsedDocIntelligence: x.LayoutProvider != null,
+            LayoutPageCount: x.LayoutPageCount,
+            ExtractionStatus: x.ExtractionStatus,
+            ExtractionSchemaVersion: x.ExtractedSchemaVersion,
+            IsTemplate: x.ExtractedIsTemplate,
+            IsExecuted: x.ExtractedIsExecuted,
+            CreatedAt: x.CreatedAt
         )).OrderByDescending(d => d.SizeBytes).ToList();
 
         // Family rollups - group by candidate type with totals.
@@ -429,13 +455,20 @@ public static class AnalysisEndpoints
         ICurrentUserContext userContext,
         CancellationToken cancellationToken)
     {
-        // Pull every asset for this tenant; prefer LLM-extracted JSON when
-        // present (clean entity names, structured lists), fall back to the
-        // regex output for docs that haven't been LLM-refined yet.
-        var assets = await db.DocumentAssets
-            .Where(a => a.TenantId == userContext.TenantId &&
-                        (a.LlmExtractedFieldsJson != null || a.ExtractedFieldsJson != null))
-            .ToListAsync(cancellationToken);
+        // Project only the columns needed for cross-doc insights so a missing
+        // migration on a newer column never causes a 500 on this endpoint.
+        var assets = await (
+            from a in db.DocumentAssets
+            where a.TenantId == userContext.TenantId &&
+                  (a.LlmExtractedFieldsJson != null || a.ExtractedFieldsJson != null)
+            select new
+            {
+                a.Id,
+                a.SourceObjectId,
+                a.LlmExtractedFieldsJson,
+                a.ExtractedFieldsJson,
+            }
+        ).ToListAsync(cancellationToken);
 
         var addressByDoc = new Dictionary<string, string>();
         // (normalized "address|suite") -> max sqft seen. Amendments often
