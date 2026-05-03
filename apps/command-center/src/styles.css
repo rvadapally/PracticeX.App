@@ -47,32 +47,33 @@ select {
 }
 
 .brand-mark {
-  height: 24px;
+  height: 30px;
   position: relative;
-  width: 24px;
+  width: 30px;
+  flex: 0 0 auto;
 }
 
 .brand-mark::before,
 .brand-mark::after {
   border-radius: 4px;
   content: '';
-  height: 22px;
+  height: 26px;
   position: absolute;
-  top: 1px;
-  transform-origin: center;
-  width: 9px;
+  top: 2px;
+  transform-origin: 50% 90%;
+  width: 8px;
 }
 
 .brand-mark::before {
   background: var(--px-orange);
-  left: 3px;
-  transform: rotate(-35deg);
+  left: 7px;
+  transform: rotate(-22deg);
 }
 
 .brand-mark::after {
   background: var(--px-green);
-  right: 3px;
-  transform: rotate(35deg);
+  right: 7px;
+  transform: rotate(22deg);
 }
 
 .brand-name {
