@@ -24,6 +24,26 @@ type WorkspaceItem = {
   count?: number;
 };
 
+function BrandMark() {
+  // Two interlocking chevrons forming a "V" mark - orange (left) + green (right).
+  // SVG is precise across browsers in a way CSS pseudo-element rotations
+  // cannot match, especially at small sizes.
+  return (
+    <svg
+      className="brand-mark"
+      viewBox="0 0 32 32"
+      width="30"
+      height="30"
+      aria-hidden="true"
+      role="img"
+    >
+      <title>PracticeX</title>
+      <path d="M 4.5 4 L 12 4 L 18 28 L 10.5 28 Z" fill="var(--px-orange, #d4631e)" />
+      <path d="M 20 4 L 27.5 4 L 21.5 28 L 14 28 Z" fill="var(--px-green, #1d6f42)" />
+    </svg>
+  );
+}
+
 export function AppShell() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -71,7 +91,7 @@ export function AppShell() {
     <div className="app" data-theme="operator" data-density="comfortable">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true" />
+          <BrandMark />
           <span className="brand-name">PracticeX Command Center</span>
         </div>
         <button className="facility-switch" type="button">
