@@ -280,11 +280,15 @@ export function readableCandidateType(type: string): string {
 export interface PortfolioFamily {
   family: string;
   documentCount: number;
+  activeCount: number;
+  expiredCount: number;
   totalPages: number;
   totalSizeMb: number;
   docIntelPagesUsed: number;
   documents: string[];
 }
+
+export type ExpirationStatus = 'active' | 'expired' | 'unknown';
 
 export interface PortfolioDocument {
   documentAssetId: string;
@@ -303,12 +307,17 @@ export interface PortfolioDocument {
   extractionSchemaVersion: string | null;
   isTemplate: boolean | null;
   isExecuted: boolean | null;
+  expirationDate: string | null;
+  expirationStatus: ExpirationStatus;
   createdAt: string;
 }
 
 export interface Portfolio {
   tenantId: string;
   totalDocuments: number;
+  activeDocuments: number;
+  expiredDocuments: number;
+  unknownDocuments: number;
   totalPages: number;
   totalSizeMb: number;
   docIntelPagesProcessed: number;

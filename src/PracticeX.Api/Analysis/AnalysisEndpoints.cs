@@ -216,25 +216,32 @@ public static class AnalysisEndpoints
             .Where(s => sourceObjectIds.Contains(s.Id))
             .ToDictionaryAsync(s => s.Id, s => s.Name, cancellationToken);
 
-        var docs = assets.Select(x => new PortfolioDocument(
-            DocumentAssetId: x.Asset.Id,
-            DocumentCandidateId: x.Candidate.Id,
-            FileName: x.Asset.SourceObjectId.HasValue && sourceObjects.TryGetValue(x.Asset.SourceObjectId.Value, out var name) ? name : "(unnamed)",
-            CandidateType: x.Candidate.CandidateType,
-            Family: MapToFamily(x.Candidate.CandidateType),
-            ExtractedSubtype: x.Asset.ExtractedSubtype,
-            Confidence: x.Candidate.Confidence,
-            PageCount: x.Asset.PageCount,
-            SizeBytes: x.Asset.SizeBytes,
-            HasTextLayer: x.Asset.HasTextLayer,
-            UsedDocIntelligence: x.Asset.LayoutProvider != null,
-            LayoutPageCount: x.Asset.LayoutPageCount,
-            ExtractionStatus: x.Asset.ExtractionStatus,
-            ExtractionSchemaVersion: x.Asset.ExtractedSchemaVersion,
-            IsTemplate: x.Asset.ExtractedIsTemplate,
-            IsExecuted: x.Asset.ExtractedIsExecuted,
-            CreatedAt: x.Asset.CreatedAt
-        )).OrderByDescending(d => d.SizeBytes).ToList();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var docs = assets.Select(x =>
+        {
+            var (expirationDate, status) = ContractStatus.Compute(x.Asset.LlmExtractedFieldsJson, today);
+            return new PortfolioDocument(
+                DocumentAssetId: x.Asset.Id,
+                DocumentCandidateId: x.Candidate.Id,
+                FileName: x.Asset.SourceObjectId.HasValue && sourceObjects.TryGetValue(x.Asset.SourceObjectId.Value, out var name) ? name : "(unnamed)",
+                CandidateType: x.Candidate.CandidateType,
+                Family: MapToFamily(x.Candidate.CandidateType),
+                ExtractedSubtype: x.Asset.ExtractedSubtype,
+                Confidence: x.Candidate.Confidence,
+                PageCount: x.Asset.PageCount,
+                SizeBytes: x.Asset.SizeBytes,
+                HasTextLayer: x.Asset.HasTextLayer,
+                UsedDocIntelligence: x.Asset.LayoutProvider != null,
+                LayoutPageCount: x.Asset.LayoutPageCount,
+                ExtractionStatus: x.Asset.ExtractionStatus,
+                ExtractionSchemaVersion: x.Asset.ExtractedSchemaVersion,
+                IsTemplate: x.Asset.ExtractedIsTemplate,
+                IsExecuted: x.Asset.ExtractedIsExecuted,
+                ExpirationDate: expirationDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                ExpirationStatus: status,
+                CreatedAt: x.Asset.CreatedAt);
+        }).OrderByDescending(d => d.SizeBytes).ToList();
 
         // Family rollups - group by candidate type with totals.
         var families = docs
@@ -242,6 +249,8 @@ public static class AnalysisEndpoints
             .Select(g => new FamilyRollup(
                 Family: g.Key,
                 DocumentCount: g.Count(),
+                ActiveCount: g.Count(d => d.ExpirationStatus == "active"),
+                ExpiredCount: g.Count(d => d.ExpirationStatus == "expired"),
                 TotalPages: g.Sum(d => d.PageCount ?? 0),
                 TotalSizeMb: Math.Round(g.Sum(d => d.SizeBytes) / 1024m / 1024m, 2),
                 DocIntelPagesUsed: g.Where(d => d.UsedDocIntelligence).Sum(d => d.LayoutPageCount ?? 0),
@@ -256,6 +265,9 @@ public static class AnalysisEndpoints
         return TypedResults.Ok(new PortfolioResponse(
             TenantId: userContext.TenantId,
             TotalDocuments: docs.Count,
+            ActiveDocuments: docs.Count(d => d.ExpirationStatus == "active"),
+            ExpiredDocuments: docs.Count(d => d.ExpirationStatus == "expired"),
+            UnknownDocuments: docs.Count(d => d.ExpirationStatus == "unknown"),
             TotalPages: docs.Sum(d => d.PageCount ?? 0),
             TotalSizeMb: Math.Round(docs.Sum(d => d.SizeBytes) / 1024m / 1024m, 2),
             DocIntelPagesProcessed: totalDocIntelPages,
@@ -803,6 +815,9 @@ public static class AnalysisEndpoints
 public sealed record PortfolioResponse(
     Guid TenantId,
     int TotalDocuments,
+    int ActiveDocuments,
+    int ExpiredDocuments,
+    int UnknownDocuments,
     int TotalPages,
     decimal TotalSizeMb,
     int DocIntelPagesProcessed,
@@ -813,6 +828,8 @@ public sealed record PortfolioResponse(
 public sealed record FamilyRollup(
     string Family,
     int DocumentCount,
+    int ActiveCount,
+    int ExpiredCount,
     int TotalPages,
     decimal TotalSizeMb,
     int DocIntelPagesUsed,
@@ -835,6 +852,8 @@ public sealed record PortfolioDocument(
     string? ExtractionSchemaVersion,
     bool? IsTemplate,
     bool? IsExecuted,
+    string? ExpirationDate,        // yyyy-MM-dd or null when no canonical date data
+    string ExpirationStatus,       // "active" | "expired" | "unknown"
     DateTimeOffset CreatedAt);
 
 public sealed record DocumentDetailResponse(
@@ -922,3 +941,73 @@ public sealed record FacilitySummary(
     string Code,
     string Name,
     string Status);
+
+/// <summary>
+/// Reads the canonical-headline JSON written by Stage-2 LLM extraction and
+/// computes whether a document is currently active, expired, or unknown.
+/// "Active" means we have a derived expiration date in the future; "expired"
+/// means it's in the past; "unknown" means we have no headline date data.
+/// Lease/employment/scheduling use expiration_date or commencement+term;
+/// NDAs use effective_date + discussion_term_months.
+/// </summary>
+internal static class ContractStatus
+{
+    public static (DateOnly? Expiration, string Status) Compute(string? llmExtractedFieldsJson, DateOnly today)
+    {
+        if (string.IsNullOrEmpty(llmExtractedFieldsJson)) return (null, "unknown");
+
+        JsonElement headline;
+        try
+        {
+            using var doc = JsonDocument.Parse(llmExtractedFieldsJson);
+            if (!doc.RootElement.TryGetProperty("headline", out var hl) ||
+                hl.ValueKind != JsonValueKind.Object)
+                return (null, "unknown");
+            headline = hl.Clone();
+        }
+        catch { return (null, "unknown"); }
+
+        // Direct expiration_date wins (lease/employment).
+        var expiration = ReadDate(headline, "expiration_date");
+        if (expiration is null)
+        {
+            // Derive from commencement_date + initial_term_months / term_months.
+            var start = ReadDate(headline, "commencement_date") ?? ReadDate(headline, "effective_date");
+            var months = ReadInt(headline, "initial_term_months") ?? ReadInt(headline, "term_months");
+            // For NDAs, use discussion_term_months as the active-period proxy.
+            if (months is null) months = ReadInt(headline, "discussion_term_months");
+            if (start is { } s && months is { } m && m > 0)
+            {
+                expiration = s.AddMonths(m);
+            }
+        }
+
+        if (expiration is null) return (null, "unknown");
+        return (expiration, expiration.Value > today ? "active" : "expired");
+    }
+
+    private static DateOnly? ReadDate(JsonElement headline, string key)
+    {
+        if (!headline.TryGetProperty(key, out var el)) return null;
+        if (el.ValueKind != JsonValueKind.String) return null;
+        var s = el.GetString();
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        if (DateOnly.TryParseExact(s, "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var d))
+            return d;
+        if (DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var dt))
+            return DateOnly.FromDateTime(dt);
+        return null;
+    }
+
+    private static int? ReadInt(JsonElement headline, string key)
+    {
+        if (!headline.TryGetProperty(key, out var el)) return null;
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var i)) return i;
+        if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var s)) return s;
+        return null;
+    }
+}

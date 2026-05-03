@@ -140,19 +140,19 @@ export function PortfolioPage() {
           helper={`${portfolio.totalPages} pages · ${portfolio.totalSizeMb.toFixed(1)} MB`}
         />
         <KpiCard
+          label="Active contracts"
+          value={portfolio.activeDocuments.toString()}
+          helper={
+            portfolio.expiredDocuments > 0 || portfolio.unknownDocuments > 0
+              ? `${portfolio.expiredDocuments} expired${portfolio.unknownDocuments > 0 ? ` · ${portfolio.unknownDocuments} undated` : ''}`
+              : 'All contracts in force'
+          }
+          tone={portfolio.activeDocuments > 0 ? 'accent' : undefined}
+        />
+        <KpiCard
           label="Scanned PDFs OCR'd"
           value={portfolio.docIntelPagesProcessed.toString()}
           helper={`Azure Doc Intelligence · $${portfolio.estimatedDocIntelCostUsd.toFixed(2)}`}
-          tone="accent"
-        />
-        <KpiCard
-          label="Total rentable sqft"
-          value={
-            insights.totalRentableSqft != null
-              ? insights.totalRentableSqft.toLocaleString('en-US')
-              : '—'
-          }
-          helper={`Across ${portfolio.families.find((f) => f.family === 'lease')?.documentCount ?? 0} leases`}
         />
         <KpiCard
           label="Unique counterparties"
@@ -284,14 +284,25 @@ function FamilyCard({
             </div>
             <div className="family-card-count">{family.documentCount}</div>
           </div>
-          {family.docIntelPagesUsed > 0 ? (
-            <StatusChip tone="accent">{family.docIntelPagesUsed} OCR'd</StatusChip>
+          {family.activeCount > 0 ? (
+            <StatusChip tone="ok">{family.activeCount} active</StatusChip>
+          ) : family.expiredCount > 0 ? (
+            <StatusChip tone="warn">all expired</StatusChip>
           ) : (
-            <StatusChip tone="ok">digital</StatusChip>
+            <StatusChip tone="muted">undated</StatusChip>
           )}
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          {family.totalPages} pages · {family.totalSizeMb.toFixed(2)} MB
+          {family.activeCount > 0 || family.expiredCount > 0 ? (
+            <>
+              {family.activeCount} active · {family.expiredCount} expired
+              {family.documentCount - family.activeCount - family.expiredCount > 0
+                ? ` · ${family.documentCount - family.activeCount - family.expiredCount} undated`
+                : ''}
+            </>
+          ) : (
+            <>{family.totalPages} pages · {family.totalSizeMb.toFixed(2)} MB</>
+          )}
         </div>
         {isActive ? (
           <div
@@ -308,18 +319,17 @@ function FamilyCard({
 
 function DocumentRow({ doc }: { doc: PortfolioDocument }) {
   const tone =
-    doc.extractionStatus === 'completed'
+    doc.expirationStatus === 'active'
       ? 'ok'
-      : doc.extractionStatus === 'no_extractor'
+      : doc.expirationStatus === 'expired'
       ? 'warn'
       : 'muted';
-
   const statusLabel =
-    doc.extractionStatus === 'completed'
-      ? 'extracted'
-      : doc.extractionStatus === 'no_extractor'
-      ? 'no extractor'
-      : doc.extractionStatus ?? 'pending';
+    doc.expirationStatus === 'active'
+      ? 'active'
+      : doc.expirationStatus === 'expired'
+      ? 'expired'
+      : 'undated';
 
   return (
     <Link to={`/portfolio/${doc.documentAssetId}`} className="doc-row" style={{ textDecoration: 'none' }}>
@@ -329,8 +339,17 @@ function DocumentRow({ doc }: { doc: PortfolioDocument }) {
         {doc.extractedSubtype ? <span className="muted"> · {doc.extractedSubtype}</span> : null}
       </div>
       <div className="doc-row-meta">
-        {doc.pageCount ?? '—'} pg
-        {doc.usedDocIntelligence ? <span className="muted"> · OCR</span> : null}
+        {doc.expirationDate ? (
+          <span title="Computed from canonical headline (expiration_date or commencement + term).">
+            {doc.expirationStatus === 'active' ? 'expires ' : 'expired '}
+            {doc.expirationDate}
+          </span>
+        ) : (
+          <>
+            {doc.pageCount ?? '—'} pg
+            {doc.usedDocIntelligence ? <span className="muted"> · OCR</span> : null}
+          </>
+        )}
       </div>
       <div>
         <StatusChip tone={tone}>{statusLabel}</StatusChip>

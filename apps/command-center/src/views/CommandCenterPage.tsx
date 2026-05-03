@@ -119,14 +119,24 @@ export function CommandCenterPage() {
                   to={`/portfolio?family=${encodeURIComponent(f.family)}`}
                   className="doc-row"
                   style={{
-                    gridTemplateColumns: 'minmax(0, 1.4fr) 80px 90px 90px',
+                    gridTemplateColumns: 'minmax(0, 1.4fr) 80px 90px 110px',
                     textDecoration: 'none',
                   }}
                 >
                   <div className="doc-row-name">{f.family.replace(/_/g, ' ')}</div>
                   <div className="doc-row-meta">{f.documentCount} doc{f.documentCount === 1 ? '' : 's'}</div>
-                  <div className="doc-row-meta">{f.totalPages} pgs</div>
-                  <div className="doc-row-meta">{f.totalSizeMb.toFixed(1)} MB</div>
+                  <div className="doc-row-meta">
+                    <span style={{ color: f.activeCount > 0 ? 'var(--px-green, #1d6f42)' : 'var(--px-fg-muted)' }}>
+                      {f.activeCount} active
+                    </span>
+                  </div>
+                  <div className="doc-row-meta">
+                    {f.expiredCount > 0 ? (
+                      <span style={{ color: 'var(--px-orange, #d4631e)' }}>{f.expiredCount} expired</span>
+                    ) : (
+                      <span className="muted">{f.totalPages} pgs</span>
+                    )}
+                  </div>
                 </Link>
               ))}
             </div>
