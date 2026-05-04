@@ -153,7 +153,7 @@ export function PortfolioPage() {
         <KpiCard
           label="Scanned PDFs OCR'd"
           value={portfolio.docIntelPagesProcessed.toString()}
-          helper={`Azure Doc Intelligence · $${portfolio.estimatedDocIntelCostUsd.toFixed(2)}`}
+          helper="Azure Document Intelligence"
         />
         <KpiCard
           label="Unique counterparties"
@@ -253,7 +253,7 @@ function BatchLlmButton({
       {result ? (
         <span className="muted" style={{ fontSize: 12 }}>
           ✓ {result.refined} refined · {result.skipped} skipped · {result.failed} failed ·{' '}
-          {Math.round(result.latencyMs / 1000)}s · ${(((result.totalTokensIn + result.totalTokensOut) / 1_000_000) * 3).toFixed(2)}
+          {Math.round(result.latencyMs / 1000)}s
         </span>
       ) : null}
       {error ? <span className="mono-label" style={{ color: 'var(--px-orange)', fontSize: 12 }}>{error}</span> : null}
@@ -527,7 +527,6 @@ function PortfolioBriefSection() {
 
   const { brief } = state;
   const generatedDate = new Date(brief.generatedAt).toLocaleString();
-  const cost = ((brief.tokensIn + brief.tokensOut) / 1_000_000) * 3;
 
   return (
     <section className="portfolio-brief-card">
@@ -537,7 +536,7 @@ function PortfolioBriefSection() {
         actions={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span className="muted" style={{ fontSize: 12 }}>
-              {generatedDate} · ${cost.toFixed(2)}
+              {generatedDate}
             </span>
             <Button variant="secondary" onClick={() => setCollapsed((c) => !c)}>
               {collapsed ? 'Expand' : 'Collapse'}
