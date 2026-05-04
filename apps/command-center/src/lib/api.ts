@@ -493,6 +493,7 @@ export interface EntityGraphLink {
   target: string;
   relation: string;
   documentAssetId?: string | null;
+  inferred?: boolean;
 }
 
 export interface EntityGraph {

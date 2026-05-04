@@ -57,12 +57,17 @@ export function EntityGraphPage() {
 
   const filtered = useMemo(() => {
     if (state.kind !== 'ready') return null;
-    const visibleNodes = state.graph.nodes.filter((n) => filterTypes.has(n.type));
-    const visibleIds = new Set(visibleNodes.map((n) => n.id));
-    const visibleLinks = state.graph.links.filter(
-      (l) => visibleIds.has(l.source) && visibleIds.has(l.target),
-    );
-    return { nodes: visibleNodes, links: visibleLinks };
+    // Keep all nodes/edges in the dataset — flag visibility so we can dim
+    // (instead of remove) filtered-out types. This preserves layout stability
+    // across chip toggles and keeps "bridge" nodes visible as faint context.
+    const isActive = (n: EntityGraphNode) => filterTypes.has(n.type);
+    const nodeActiveById = new Map<string, boolean>();
+    state.graph.nodes.forEach((n) => nodeActiveById.set(n.id, isActive(n)));
+    return {
+      nodes: state.graph.nodes,
+      links: state.graph.links,
+      isNodeActive: (id: string) => nodeActiveById.get(id) ?? false,
+    };
   }, [state, filterTypes]);
 
   // Build / refresh the network. Using vis-network's imperative API since
@@ -70,42 +75,63 @@ export function EntityGraphPage() {
   useEffect(() => {
     if (!containerRef.current || !filtered) return;
 
+    const dimNodeColor = (n: EntityGraphNode) => {
+      const c = TYPE_COLORS[n.type] ?? TYPE_COLORS.document;
+      return {
+        background: dim(c.background, 0.85),
+        border: dim(c.border, 0.7),
+        highlight: c.highlight,
+      };
+    };
+
     const nodes = new DataSet(
-      filtered.nodes.map((n) => ({
-        id: n.id,
-        label: truncate(n.label, 38),
-        title: n.label, // hover tooltip
-        shape: n.type === 'document' ? 'box' : 'dot',
-        size: n.size,
-        color: TYPE_COLORS[n.type] ?? TYPE_COLORS.document,
-        font: {
-          size: n.type === 'document' ? 11 : 12.5,
-          color: '#1f1f1f',
-          face: 'Inter, system-ui, sans-serif',
-        },
-        borderWidth: 1.5,
-        _payload: n,
-      })),
+      filtered.nodes.map((n) => {
+        const active = filtered.isNodeActive(n.id);
+        return {
+          id: n.id,
+          label: truncate(n.label, 38),
+          title: n.label,
+          shape: n.type === 'document' ? 'box' : 'dot',
+          size: n.size,
+          color: active ? (TYPE_COLORS[n.type] ?? TYPE_COLORS.document) : dimNodeColor(n),
+          font: {
+            size: n.type === 'document' ? 11 : 12.5,
+            color: active ? '#1f1f1f' : '#bdbdbd',
+            face: 'Inter, system-ui, sans-serif',
+          },
+          borderWidth: active ? 1.5 : 0.6,
+          _payload: n,
+        };
+      }),
     );
 
     const edges = new DataSet(
-      filtered.links.map((l, i) => ({
-        id: `e${i}`,
-        from: l.source,
-        to: l.target,
-        label: l.relation,
-        font: {
-          size: 9,
-          color: '#737373',
-          face: 'ui-monospace, monospace',
-          background: 'rgba(255,255,255,0.7)',
-          strokeWidth: 0,
-        },
-        color: { color: '#d4d4d4', highlight: '#d4631e', hover: '#a3a3a3' },
-        smooth: { enabled: true, type: 'continuous', roundness: 0.5 },
-        arrows: 'to',
-        width: 1,
-      })),
+      filtered.links.map((l, i) => {
+        const bothActive = filtered.isNodeActive(l.source) && filtered.isNodeActive(l.target);
+        const inferred = l.inferred === true;
+        return {
+          id: `e${i}`,
+          from: l.source,
+          to: l.target,
+          label: bothActive ? l.relation : '',
+          font: {
+            size: 9,
+            color: '#737373',
+            face: 'ui-monospace, monospace',
+            background: 'rgba(255,255,255,0.7)',
+            strokeWidth: 0,
+          },
+          color: bothActive
+            ? (inferred
+                ? { color: '#fbbf24', highlight: '#d4631e', hover: '#fde68a' }
+                : { color: '#d4d4d4', highlight: '#d4631e', hover: '#a3a3a3' })
+            : { color: 'rgba(212,212,212,0.18)', highlight: '#d4631e', hover: 'rgba(163,163,163,0.3)' },
+          dashes: inferred ? [4, 4] : false,
+          smooth: { enabled: true, type: 'continuous', roundness: 0.5 },
+          arrows: inferred ? '' : 'to',
+          width: inferred ? 1.4 : 1,
+        };
+      }),
     );
 
     const options: Options = {
@@ -196,7 +222,8 @@ export function EntityGraphPage() {
           <h1 className="page-title">Entity graph</h1>
           <div className="page-subtitle">
             People, organizations, premises, and the documents that link them. Click a node to inspect.
-            Double-click a document to drill in.
+            Double-click a document to drill in. Dashed edges are inferred co-appearance — same
+            document, no direct relationship.
           </div>
         </div>
       </header>
@@ -307,4 +334,19 @@ function SelectedNodePanel({ node, graph }: { node: EntityGraphNode; graph: Enti
 
 function truncate(s: string, n: number) {
   return s.length <= n ? s : s.slice(0, n - 1) + '…';
+}
+
+// Blend a hex/named CSS color toward white. Used to render dimmed nodes
+// (filtered-out types) without removing them, so the bridge structure
+// stays visible as faint context.
+function dim(color: string, mix: number): string {
+  const hex = color.startsWith('#') ? color.slice(1) : color;
+  if (hex.length !== 6) return color;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const m = Math.max(0, Math.min(1, mix));
+  const blend = (v: number) => Math.round(v + (255 - v) * m);
+  const toHex = (v: number) => v.toString(16).padStart(2, '0');
+  return `#${toHex(blend(r))}${toHex(blend(g))}${toHex(blend(b))}`;
 }

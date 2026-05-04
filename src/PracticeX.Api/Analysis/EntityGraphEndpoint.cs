@@ -327,11 +327,64 @@ public static class EntityGraphEndpoint
                 Target: l.Target,
                 Relation: l.Relation,
                 DocumentAssetId: _docs.TryGetValue(l.Source, out var d) ? d.DocumentAssetId :
-                                 _docs.TryGetValue(l.Target, out var d2) ? d2.DocumentAssetId : null
+                                 _docs.TryGetValue(l.Target, out var d2) ? d2.DocumentAssetId : null,
+                Inferred: false
             )).ToList();
+
+            // Inferred co-appearance edges: when two entities of the same type
+            // both touch the same document, surface a direct edge between them.
+            // Lets the UI show person-person clustering when the user filters
+            // out the "document" chip — otherwise people would orphan because
+            // every relationship in v1 routes through a document hub.
+            // Cap per-doc fan-out at 6 to keep board-bylaws docs from emitting
+            // 30+ noisy pairs.
+            var entitiesByDoc = new Dictionary<string, List<(string id, string type)>>();
+            foreach (var l in _links)
+            {
+                if (_docs.ContainsKey(l.Source) && _entities.TryGetValue(l.Target, out var e))
+                {
+                    if (!entitiesByDoc.TryGetValue(l.Source, out var list))
+                    {
+                        list = new();
+                        entitiesByDoc[l.Source] = list;
+                    }
+                    list.Add((l.Target, e.Type));
+                }
+            }
+
+            var inferredKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var (docId, members) in entitiesByDoc)
+            {
+                if (members.Count > 6) continue;
+                var docLabel = _docs.TryGetValue(docId, out var ds) ? ds.Display : docId;
+                var docAssetId = _docs.TryGetValue(docId, out var ds2) ? (Guid?)ds2.DocumentAssetId : null;
+                for (var i = 0; i < members.Count; i++)
+                {
+                    for (var j = i + 1; j < members.Count; j++)
+                    {
+                        if (members[i].type != members[j].type) continue;
+                        if (members[i].type == "document") continue;
+                        var a = members[i].id;
+                        var b = members[j].id;
+                        // Canonical-ordered key so (a,b) == (b,a).
+                        var key = string.CompareOrdinal(a, b) < 0 ? $"{a}|{b}" : $"{b}|{a}";
+                        if (!inferredKeys.Add(key)) continue;
+                        links.Add(new EntityGraphLink(
+                            Source: a,
+                            Target: b,
+                            Relation: $"co-appears in {Truncate(docLabel, 40)}",
+                            DocumentAssetId: docAssetId,
+                            Inferred: true
+                        ));
+                    }
+                }
+            }
 
             return (nodes, links);
         }
+
+        private static string Truncate(string s, int max) =>
+            s.Length <= max ? s : s[..max] + "…";
 
         private static readonly string[] EntitySuffixes =
         {
@@ -401,4 +454,5 @@ public sealed record EntityGraphLink(
     string Source,
     string Target,
     string Relation,
-    Guid? DocumentAssetId);
+    Guid? DocumentAssetId,
+    bool Inferred);
