@@ -5,6 +5,7 @@ import { DataSet } from 'vis-data/peer';
 import { Network, type Options } from 'vis-network/peer';
 import 'vis-network/styles/vis-network.css';
 import { analysisApi, type EntityGraph, type EntityGraphLink, type EntityGraphNode } from '../lib/api';
+import { logEvent } from '../lib/analytics';
 
 type LoadState =
   | { kind: 'loading' }
@@ -236,14 +237,15 @@ export function EntityGraphPage() {
             <button
               key={t}
               type="button"
-              onClick={() =>
+              onClick={() => {
                 setFilterTypes((prev) => {
                   const next = new Set(prev);
                   if (next.has(t)) next.delete(t);
                   else next.add(t);
+                  logEvent('graph_chip_toggle', { type: t, on: next.has(t) });
                   return next;
-                })
-              }
+                });
+              }}
               className="graph-legend-chip"
               style={{
                 opacity: isOn ? 1 : 0.4,

@@ -9,6 +9,7 @@ import {
   type ExtractedField,
   readableCandidateType,
 } from '../lib/api';
+import { logEvent } from '../lib/analytics';
 
 type RightPaneTab = 'brief' | 'fields';
 
@@ -47,7 +48,14 @@ export function DocumentDetailPage() {
     (async () => {
       try {
         const detail = await analysisApi.getDocument(assetId);
-        if (!cancelled) setState({ kind: 'ready', detail });
+        if (!cancelled) {
+          setState({ kind: 'ready', detail });
+          logEvent('document_open', {
+            assetId,
+            fileName: detail.fileName ?? null,
+            candidateType: detail.candidateType ?? null,
+          });
+        }
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : 'Failed to load document.';

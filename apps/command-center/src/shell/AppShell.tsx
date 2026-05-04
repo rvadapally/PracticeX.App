@@ -14,8 +14,9 @@ import {
   Upload,
   Zap,
 } from 'lucide-react';
-import { NavLink, Outlet, useNavigate, useSearchParams } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { analysisApi, type CurrentUser, type DashboardStats, type Facility } from '../lib/api';
+import { logEvent, logPageView } from '../lib/analytics';
 
 type WorkspaceItem = {
   to: string;
@@ -49,8 +50,16 @@ export function AppShell() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const activeFacility = searchParams.get('facility');
+
+  // Fire a page_view event on every route change so post-demo analytics
+  // can show which sections the guest explored. Runs on mount + on path
+  // change; ignores trailing slashes.
+  useEffect(() => {
+    logPageView();
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     let cancelled = false;
@@ -151,7 +160,10 @@ export function AppShell() {
               <button
                 className={`facility-pill ${!activeFacility ? 'active' : ''}`}
                 type="button"
-                onClick={() => navigate('/portfolio')}
+                onClick={() => {
+                  logEvent('facility_filter', { facilityId: 'all' });
+                  navigate('/portfolio');
+                }}
               >
                 <span className="facility-code">ALL</span>
                 <span>Portfolio view</span>
@@ -164,7 +176,13 @@ export function AppShell() {
                   className={`facility-pill ${activeFacility === facility.id ? 'active' : ''}`}
                   key={facility.id}
                   type="button"
-                  onClick={() => navigate(`/portfolio?facility=${encodeURIComponent(facility.id)}`)}
+                  onClick={() => {
+                    logEvent('facility_filter', {
+                      facilityId: facility.id,
+                      facilityName: facility.name,
+                    });
+                    navigate(`/portfolio?facility=${encodeURIComponent(facility.id)}`);
+                  }}
                 >
                   <span className="facility-code">{facility.code}</span>
                   <span>{facility.name}</span>

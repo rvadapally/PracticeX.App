@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http.Features;
 using PracticeX.Api.Analysis;
+using PracticeX.Api.Analytics;
 using PracticeX.Api.SourceDiscovery;
 using PracticeX.Infrastructure;
 using PracticeX.Infrastructure.Persistence;
@@ -114,6 +115,7 @@ app.MapOcrReprocessEndpoints();
 app.MapPortfolioBriefEndpoints();
 app.MapRenewalsEndpoints();
 app.MapEntityGraphEndpoints();
+app.MapAnalyticsEndpoints();
 
 // Demo seed: creates the default tenant + user the demo current-user resolver
 // expects. In production this is replaced by tenant onboarding flows.
