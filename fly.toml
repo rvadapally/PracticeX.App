@@ -1,0 +1,52 @@
+# Fly.io alternative for hosting the PracticeX Command Center API.
+#
+# Use this if Render is unavailable or rate-limited:
+#   1. brew install flyctl  (or: curl -L https://fly.io/install.sh | sh)
+#   2. flyctl auth login
+#   3. flyctl launch --no-deploy --copy-config --name practicex-api
+#   4. flyctl postgres create --name practicex-db --region iad
+#   5. flyctl postgres attach --app practicex-api practicex-db
+#         (sets DATABASE_URL automatically; the entrypoint translates it)
+#   6. flyctl deploy
+#   7. Repoint api.practicex.ai at practicex-api.fly.dev (Cloudflare DNS).
+
+app = "practicex-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ASPNETCORE_ENVIRONMENT = "Production"
+  PORT = "8080"
+  Seeding__DemoTenant = "true"
+  Migrations__RunOnStartup = "true"
+  Cors__AllowedOrigins__0 = "https://app.practicex.ai"
+  Cors__AllowedOrigins__1 = "https://app.practicex.net"
+  Cors__AllowedOrigins__2 = "https://practicex-app.pages.dev"
+  Cors__AllowedOriginPatterns__0 = "https://*.practicex-app.pages.dev"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/api/system/info"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  cpus = 1
