@@ -6,6 +6,7 @@ import {
   Clock,
   FileStack,
   Home,
+  LogOut,
   Network,
   Search,
   Settings,
@@ -26,9 +27,9 @@ type WorkspaceItem = {
 };
 
 function BrandMark() {
-  // Two interlocking chevrons forming a "V" mark - orange (left) + green (right).
-  // SVG is precise across browsers in a way CSS pseudo-element rotations
-  // cannot match, especially at small sizes.
+  // Two crossing diagonal bars forming an "X" — orange `\` (top-left to
+  // bottom-right) + green `/` (top-right to bottom-left). SVG keeps the
+  // crossing crisp at small sizes where CSS rotations would alias.
   return (
     <svg
       className="brand-mark"
@@ -39,8 +40,8 @@ function BrandMark() {
       role="img"
     >
       <title>PracticeX</title>
-      <path d="M 4.5 4 L 12 4 L 18 28 L 10.5 28 Z" fill="var(--px-orange, #d4631e)" />
-      <path d="M 20 4 L 27.5 4 L 21.5 28 L 14 28 Z" fill="var(--px-green, #1d6f42)" />
+      <path d="M 4.5 4 L 12 4 L 27.5 28 L 20 28 Z" fill="var(--px-orange, #d4631e)" />
+      <path d="M 20 4 L 27.5 4 L 12 28 L 4.5 28 Z" fill="var(--px-green, #1d6f42)" />
     </svg>
   );
 }
@@ -99,6 +100,15 @@ export function AppShell() {
   const userInitials = user?.initials ?? '?';
   const tenantName = user?.tenantName ?? 'Loading…';
 
+  // Cloudflare Access intercepts /cdn-cgi/access/logout on any
+  // Access-protected hostname and clears the application session
+  // cookie. After redirect the user lands back on the OTP gate.
+  // In local dev (no Access in front) this just 404s — harmless.
+  const handleLogout = () => {
+    logEvent('logout_clicked', { email: user?.email ?? null });
+    window.location.href = '/cdn-cgi/access/logout';
+  };
+
   return (
     <div className="app" data-theme="operator" data-density="comfortable">
       <header className="topbar">
@@ -139,6 +149,15 @@ export function AppShell() {
           <Settings size={15} />
         </button>
         <div className="px-avatar" title={userName}>{userInitials}</div>
+        <button
+          className="px-icon-button"
+          type="button"
+          aria-label="Sign out"
+          title={user?.email ? `Sign out (${user.email})` : 'Sign out'}
+          onClick={handleLogout}
+        >
+          <LogOut size={15} />
+        </button>
       </header>
       <aside className="sidebar">
         <section className="nav-section">
