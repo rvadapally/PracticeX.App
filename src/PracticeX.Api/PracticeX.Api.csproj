@@ -27,4 +27,43 @@
     <EmbeddedResource Include="Analysis\Prompts\*.md" />
   </ItemGroup>
 
+  <!--
+    Embed the canonical SQL migration scripts so StartupMigrationRunner can
+    apply them on cloud-hosted environments where there is no human operator
+    to run psql before the first request. The LogicalName prefix
+    "migrations." is what StartupMigrationRunner looks up by.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\migrations\practicex_initial_enterprise_foundation.sql">
+      <LogicalName>migrations.practicex_initial_enterprise_foundation.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260425_source_discovery_extensions.sql">
+      <LogicalName>migrations.20260425_source_discovery_extensions.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260426_manifest_phase_extensions.sql">
+      <LogicalName>migrations.20260426_manifest_phase_extensions.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260427_doc_intel_layout.sql">
+      <LogicalName>migrations.20260427_doc_intel_layout.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260427_complexity_profiling.sql">
+      <LogicalName>migrations.20260427_complexity_profiling.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260428_extracted_fields.sql">
+      <LogicalName>migrations.20260428_extracted_fields.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260429_extracted_full_text.sql">
+      <LogicalName>migrations.20260429_extracted_full_text.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260429_llm_extracted_fields.sql">
+      <LogicalName>migrations.20260429_llm_extracted_fields.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260430_llm_narrative_brief.sql">
+      <LogicalName>migrations.20260430_llm_narrative_brief.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\migrations\20260430_portfolio_brief.sql">
+      <LogicalName>migrations.20260430_portfolio_brief.sql</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

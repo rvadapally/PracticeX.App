@@ -1,0 +1,60 @@
+# Render.com one-click blueprint for PracticeX Command Center API.
+#
+# Use:
+#   1. Push this file on a branch.
+#   2. https://render.com -> New -> Blueprint -> connect this repo.
+#   3. Render provisions the Postgres database + the API web service and
+#      wires `ConnectionStrings__PracticeX` automatically.
+#   4. Schema bootstraps itself on first boot via StartupMigrationRunner.
+#   5. Repoint api.practicex.ai (or api.practicex.net) at the resulting
+#      onrender.com host via Cloudflare DNS — see docs/cloud-host-runbook.md.
+#
+# Free tier intentionally chosen so the demo cost is $0. Move to Starter
+# instances and a paid Postgres before any non-demo traffic — free Postgres
+# expires after 90 days and free web services cold-start.
+
+databases:
+  - name: practicex-db
+    plan: free
+    databaseName: practicex
+    user: practicex
+    postgresMajorVersion: 16
+    ipAllowList: []   # private network only — only the web service connects
+
+services:
+  - type: web
+    name: practicex-api
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/system/info
+    autoDeploy: true
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: PORT
+        value: "8080"
+      # Render injects DATABASE_URL in postgres:// form; PracticeX expects an
+      # ADO.NET keyword string under ConnectionStrings__PracticeX. The
+      # entrypoint translates DATABASE_URL when ConnectionStrings__PracticeX
+      # is not explicitly set — see scripts/render_db_url_to_npgsql.sh in a
+      # follow-up if needed. For now wire from individual database fields.
+      - key: ConnectionStrings__PracticeX
+        fromDatabase:
+          name: practicex-db
+          property: connectionString
+      - key: Seeding__DemoTenant
+        value: "true"
+      - key: Migrations__RunOnStartup
+        value: "true"
+      - key: Cors__AllowedOrigins__0
+        value: "https://app.practicex.ai"
+      - key: Cors__AllowedOrigins__1
+        value: "https://app.practicex.net"
+      - key: Cors__AllowedOrigins__2
+        value: "https://practicex-app.pages.dev"
+      - key: Cors__AllowedOriginPatterns__0
+        value: "https://*.practicex-app.pages.dev"

@@ -9,6 +9,17 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Cloud hosts (Render, Fly, Azure Container Apps, GCR) inject $PORT and
+// expect the process to bind to 0.0.0.0:$PORT over plain HTTP — TLS is
+// terminated at the platform edge. Honour $PORT when present so the same
+// container image runs on any of those targets without per-host config.
+// ASPNETCORE_URLS still wins if explicitly set (used by local dev).
+var cloudPort = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrEmpty(cloudPort) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{cloudPort}");
+}
+
 builder.Services.AddOpenApi();
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -64,6 +75,19 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// ADR 0005: migrations are idempotent SQL scripts. On cloud-hosted
+// environments (Render / Fly / Azure) there is no human operator to run
+// psql before the first request, so the API self-bootstraps schema before
+// any middleware or endpoint runs. StartupMigrationRunner is a no-op when
+// the database is unreachable, so local dev without Postgres still boots.
+if (app.Configuration.GetValue("Migrations:RunOnStartup", true))
+{
+    await PracticeX.Infrastructure.Persistence.StartupMigrationRunner.RunAsync(
+        typeof(Program).Assembly,
+        app.Configuration,
+        app.Logger);
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -76,7 +100,15 @@ if (app.Environment.IsDevelopment())
 
 app.UseResponseCompression();
 app.UseCors("CommandCenter");
-app.UseHttpsRedirection();
+
+// Cloud hosts terminate TLS at their edge and forward plain HTTP to the
+// container; UseHttpsRedirection() in that posture causes a redirect loop
+// or warnings about no HTTPS port being configured. Skip it whenever
+// $PORT is set (the same signal we used to bind to plain HTTP above).
+if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PORT")))
+{
+    app.UseHttpsRedirection();
+}
 
 // Friendly root - point devs at the docs instead of returning 404.
 app.MapGet("/", () => Results.Content(
@@ -118,8 +150,10 @@ app.MapEntityGraphEndpoints();
 app.MapAnalyticsEndpoints();
 
 // Demo seed: creates the default tenant + user the demo current-user resolver
-// expects. In production this is replaced by tenant onboarding flows.
-if (app.Environment.IsDevelopment() && app.Configuration.GetValue("Seeding:DemoTenant", true))
+// expects. In production this is replaced by tenant onboarding flows. The
+// cloud-host posture (Seeding:DemoTenant=true via env) is intentional so the
+// demo URL works on a fresh managed Postgres without manual seeding.
+if (app.Configuration.GetValue("Seeding:DemoTenant", app.Environment.IsDevelopment()))
 {
     using var scope = app.Services.CreateScope();
     try
