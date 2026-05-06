@@ -400,6 +400,119 @@ select {
   font-size: 12px;
 }
 
+/* Lease property cards — collapse multiple lease versions for the same
+   building into a single card with a "most recent" headline and an
+   expandable history of prior versions. */
+.lease-property-card {
+  border: 1px solid var(--px-line-2);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--px-bg-1);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lease-property-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.lease-property-address {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lease-property-summary {
+  color: var(--px-fg-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.lease-current-row {
+  align-items: baseline;
+  border: 1px solid var(--px-line-2);
+  border-radius: 8px;
+  color: inherit;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 88px minmax(0, 1.6fr) minmax(0, 1.4fr);
+  padding: 10px 12px;
+  transition: background 0.15s ease;
+}
+
+.lease-current-row:hover { background: var(--px-bg-0); }
+
+.lease-current-label {
+  color: var(--px-fg-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lease-current-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lease-current-meta {
+  font-size: 12px;
+}
+
+.lease-history-toggle {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--px-fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.lease-history-toggle:hover { color: var(--px-fg, inherit); }
+
+.lease-history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.lease-history-row {
+  align-items: baseline;
+  border-top: 1px solid var(--px-line-2);
+  color: inherit;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 100px minmax(0, 1.6fr) minmax(0, 1.4fr);
+  padding: 8px 4px;
+}
+
+.lease-history-row:hover { background: var(--px-bg-0); }
+
+.lease-history-date {
+  color: var(--px-fg-muted);
+  font-size: 12px;
+}
+
+.lease-history-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lease-history-meta {
+  color: var(--px-fg-muted);
+  font-size: 12px;
+}
+
 .insights-panel {
   display: flex;
   flex-direction: column;

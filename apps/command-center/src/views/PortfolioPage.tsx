@@ -15,6 +15,7 @@ import {
   readableFamily,
 } from '../lib/api';
 import { MaintenancePage, MaintenanceMessage } from '../shell/MaintenanceMessage';
+import { groupLeasesByProperty, type LeaseGroup } from '../lib/lease-grouping';
 
 type LoadState =
   | { kind: 'loading' }
@@ -208,17 +209,25 @@ export function PortfolioPage() {
           }
         >
           <div className="muted" style={{ marginBottom: 8, fontSize: 13 }}>
-            {familyFilter
+            {familyFilter === 'lease'
+              ? 'Leases are grouped by property — the most recent operative document leads each card; prior versions are collapsed underneath.'
+              : familyFilter
               ? `Filtered to ${readableFamily(familyFilter).toLowerCase()}. Click a family card above to switch.`
               : 'Click any row to drill into extracted fields. Click a family card above to filter.'}
           </div>
-          <div className="doc-table">
-            {portfolio.documents
-              .filter((d) => !familyFilter || d.family === familyFilter)
-              .map((d) => (
-                <DocumentRow key={d.documentAssetId} doc={d} />
-              ))}
-          </div>
+          {familyFilter === 'lease' ? (
+            <LeasePropertyList
+              docs={portfolio.documents.filter((d) => d.family === 'lease')}
+            />
+          ) : (
+            <div className="doc-table">
+              {portfolio.documents
+                .filter((d) => !familyFilter || d.family === familyFilter)
+                .map((d) => (
+                  <DocumentRow key={d.documentAssetId} doc={d} />
+                ))}
+            </div>
+          )}
         </Card>
       </section>
     </div>
@@ -362,6 +371,110 @@ function DocumentRow({ doc }: { doc: PortfolioDocument }) {
         <StatusChip tone={tone}>{statusLabel}</StatusChip>
       </div>
     </Link>
+  );
+}
+
+function LeasePropertyList({ docs }: { docs: PortfolioDocument[] }) {
+  const groups = groupLeasesByProperty(docs);
+  if (groups.length === 0) {
+    return <div className="muted" style={{ padding: '12px 0' }}>No lease documents.</div>;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {groups.map((g) => (
+        <LeasePropertyCard key={g.key} group={g} />
+      ))}
+    </div>
+  );
+}
+
+function LeasePropertyCard({ group }: { group: LeaseGroup }) {
+  const [open, setOpen] = useState(false);
+  const total = group.history.length + 1;
+  const current = group.current;
+  const tone =
+    current.expirationStatus === 'active'
+      ? 'ok'
+      : current.expirationStatus === 'expired'
+      ? 'warn'
+      : 'muted';
+
+  return (
+    <div className="lease-property-card">
+      <div className="lease-property-head">
+        <div style={{ minWidth: 0 }}>
+          <div className="lease-property-address" title={group.displayAddress}>
+            {group.displayAddress}
+          </div>
+          <div className="lease-property-summary">
+            {total} document{total === 1 ? '' : 's'}
+            {group.activeCount > 0 ? ` · ${group.activeCount} active` : ''}
+            {group.expiredCount > 0 ? ` · ${group.expiredCount} expired` : ''}
+          </div>
+        </div>
+        <StatusChip tone={tone}>
+          {current.expirationStatus === 'active'
+            ? 'active'
+            : current.expirationStatus === 'expired'
+            ? 'expired'
+            : 'undated'}
+        </StatusChip>
+      </div>
+
+      <Link
+        to={`/portfolio/${current.documentAssetId}`}
+        className="lease-current-row"
+        style={{ textDecoration: 'none' }}
+      >
+        <div className="lease-current-label">Most recent</div>
+        <div className="lease-current-name" title={current.fileName}>{current.fileName}</div>
+        <div className="lease-current-meta">
+          {readableCandidateType(current.candidateType)}
+          {current.extractedSubtype ? <span className="muted"> · {current.extractedSubtype}</span> : null}
+          {current.effectiveDate ? <span className="muted"> · effective {current.effectiveDate}</span> : null}
+          {current.expirationDate ? (
+            <span className="muted">
+              {' · '}
+              {current.expirationStatus === 'active' ? 'expires ' : 'expired '}
+              {current.expirationDate}
+            </span>
+          ) : null}
+        </div>
+      </Link>
+
+      {group.history.length > 0 ? (
+        <>
+          <button
+            type="button"
+            className="lease-history-toggle"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+          >
+            {open ? '▾' : '▸'} {group.history.length} prior version
+            {group.history.length === 1 ? '' : 's'}
+          </button>
+          {open ? (
+            <div className="lease-history-list">
+              {group.history.map((h) => (
+                <Link
+                  key={h.documentAssetId}
+                  to={`/portfolio/${h.documentAssetId}`}
+                  className="lease-history-row"
+                  style={{ textDecoration: 'none' }}
+                >
+                  <div className="lease-history-date">{h.effectiveDate ?? '—'}</div>
+                  <div className="lease-history-name" title={h.fileName}>{h.fileName}</div>
+                  <div className="lease-history-meta">
+                    {readableCandidateType(h.candidateType)}
+                    {h.extractedSubtype ? <span className="muted"> · {h.extractedSubtype}</span> : null}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </div>
   );
 }
 

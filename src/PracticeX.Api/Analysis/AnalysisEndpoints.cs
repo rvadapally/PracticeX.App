@@ -242,6 +242,7 @@ public static class AnalysisEndpoints
         var docs = assets.Select(x =>
         {
             var (expirationDate, status) = ContractStatus.Compute(x.Asset.LlmExtractedFieldsJson, today);
+            var (propertyAddress, effectiveDate) = LeaseHeadline.Read(x.Asset.LlmExtractedFieldsJson);
             return new PortfolioDocument(
                 DocumentAssetId: x.Asset.Id,
                 DocumentCandidateId: x.Candidate.Id,
@@ -262,6 +263,8 @@ public static class AnalysisEndpoints
                 ExpirationDate: expirationDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
                 ExpirationStatus: status,
                 FacilityId: x.Candidate.FacilityHintId,
+                PropertyAddress: propertyAddress,
+                EffectiveDate: effectiveDate,
                 CreatedAt: x.Asset.CreatedAt);
         }).OrderByDescending(d => d.SizeBytes).ToList();
 
@@ -877,6 +880,8 @@ public sealed record PortfolioDocument(
     string? ExpirationDate,        // yyyy-MM-dd or null when no canonical date data
     string ExpirationStatus,       // "active" | "expired" | "unknown"
     Guid? FacilityId,
+    string? PropertyAddress,       // headline.premises_address — used to group leases by building
+    string? EffectiveDate,         // yyyy-MM-dd — for sorting versions of the same property
     DateTimeOffset CreatedAt);
 
 public sealed record DocumentDetailResponse(
@@ -1034,4 +1039,40 @@ internal static class ContractStatus
         if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var s)) return s;
         return null;
     }
+}
+
+/// <summary>
+/// Pulls the canonical property address (from the headline block) and the
+/// document's effective date from the LLM-extracted JSON. Both are used by
+/// the frontend to collapse multiple lease versions onto a single property.
+/// </summary>
+internal static class LeaseHeadline
+{
+    public static (string? PropertyAddress, string? EffectiveDate) Read(string? llmExtractedFieldsJson)
+    {
+        if (string.IsNullOrEmpty(llmExtractedFieldsJson)) return (null, null);
+        try
+        {
+            using var doc = JsonDocument.Parse(llmExtractedFieldsJson);
+            var root = doc.RootElement;
+            string? address = null;
+            if (root.TryGetProperty("headline", out var hl) && hl.ValueKind == JsonValueKind.Object
+                && hl.TryGetProperty("premises_address", out var addr) && addr.ValueKind == JsonValueKind.String)
+            {
+                address = addr.GetString();
+            }
+            string? effective = null;
+            if (root.TryGetProperty("effective_date", out var ed) && ed.ValueKind == JsonValueKind.String)
+            {
+                effective = ed.GetString();
+            }
+            return (NullIfBlank(address), NullIfBlank(effective));
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 }

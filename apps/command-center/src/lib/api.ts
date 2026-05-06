@@ -310,6 +310,8 @@ export interface PortfolioDocument {
   expirationDate: string | null;
   expirationStatus: ExpirationStatus;
   facilityId: string | null;
+  propertyAddress: string | null;
+  effectiveDate: string | null;
   createdAt: string;
 }
 
