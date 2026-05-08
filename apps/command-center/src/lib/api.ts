@@ -21,6 +21,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: 'include',
     ...init,
   });
+
+  // Cloudflare Access "session expired" path: the redirect to
+  // truwit.cloudflareaccess.com/login lands on a 200 OK HTML page (the
+  // OTP sign-in screen). Without this guard, res.ok is true, .json()
+  // throws on the HTML, and every page latches onto MaintenancePage —
+  // auto-retry fires forever against the same redirect. Detect the
+  // content-type mismatch and force a top-level navigation so Access
+  // can refresh the cookie inline; the SPA reloads against a fresh
+  // session afterwards.
+  const contentType = res.headers.get('content-type') ?? '';
+  if (
+    res.ok &&
+    res.status !== 204 &&
+    !contentType.toLowerCase().includes('json') &&
+    typeof window !== 'undefined'
+  ) {
+    window.location.reload();
+    // Give the navigation a tick to take effect before throwing.
+    return new Promise<T>(() => {});
+  }
+
   if (!res.ok) {
     let body: unknown = undefined;
     try {
