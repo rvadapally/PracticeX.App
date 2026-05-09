@@ -830,6 +830,18 @@ public static class AnalysisEndpoints
         DocumentCandidateTypes.ProcessorAgreement => "compliance",
         DocumentCandidateTypes.FeeSchedule => "fee_schedule",
         DocumentCandidateTypes.OperationalData => "operational_data",
+
+        // Synexar / early-stage company taxonomy.
+        DocumentCandidateTypes.BoardResolution or
+        DocumentCandidateTypes.FoundersMeeting => "corp_governance",
+        DocumentCandidateTypes.EquityGrant or
+        DocumentCandidateTypes.TermSheet => "equity",
+        DocumentCandidateTypes.IpAssignment => "ip",
+        DocumentCandidateTypes.CorpFormation => "corp_formation",
+        DocumentCandidateTypes.RegulatoryFiling => "regulatory",
+        DocumentCandidateTypes.PrivacyPolicy or
+        DocumentCandidateTypes.TermsOfService => "policy",
+
         _ => "unclassified"
     };
 }

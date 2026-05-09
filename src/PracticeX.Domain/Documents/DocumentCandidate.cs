@@ -43,6 +43,21 @@ public static class DocumentCandidateTypes
     // contract family but are operationally valuable, especially for the
     // scheduling-led wedge.
     public const string OperationalData = "operational_data";
+
+    // Corporate / equity / regulatory taxonomy added for Synexar's
+    // foundation-doc corpus. Each type lands in a dedicated family in
+    // MapToFamily so the portfolio surface keeps a meaningful rollup
+    // even when most of the practice's docs are not contracts at all
+    // (early-stage companies, M&A diligence rooms, board books).
+    public const string BoardResolution = "board_resolution";
+    public const string EquityGrant = "equity_grant";              // founder stock, option grant, equity plan, 83(b)
+    public const string IpAssignment = "ip_assignment";            // founder + contributor + employee PIIA
+    public const string CorpFormation = "corp_formation";          // cert of inc, EIN, state filings, franchise tax
+    public const string RegulatoryFiling = "regulatory_filing";    // BOI, SEC, IRS forms
+    public const string PrivacyPolicy = "privacy_policy";
+    public const string TermsOfService = "terms_of_service";
+    public const string TermSheet = "term_sheet";                  // SAFE, convertible note, Series A term sheet
+    public const string FoundersMeeting = "founders_meeting";      // founder/board meeting minutes
 }
 
 public static class DocumentCandidateStatus

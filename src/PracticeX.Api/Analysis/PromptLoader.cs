@@ -21,14 +21,45 @@ public static class PromptLoader
         "nda" => "Nda",
         "employee_agreement" or "amendment" => "Employment",
         "call_coverage_agreement" => "CallCoverage",
+
+        // Slice 20.1 — Synexar / early-stage corporate taxonomy.
+        // Each maps to a Counsel's-Memo family overlay tuned to its
+        // domain. Stage-1 brief routing falls back to "Generic" for
+        // these because the existing brief prompts were authored for
+        // healthcare-practice flow and don't yet cover corporate
+        // formation / equity / governance specifics.
+        "term_sheet" or "equity_grant" => "Equity",
+        "board_resolution" or "founders_meeting" => "Governance",
+        "ip_assignment" => "IpAssignment",
+        "corp_formation" => "CorpFormation",
+        "regulatory_filing" => "Regulatory",
+        "privacy_policy" or "terms_of_service" => "Policy",
+
+        _ => "Generic"
+    };
+
+    /// <summary>
+    /// Stage-1 (Document Intelligence Brief) family resolution. Today the
+    /// Stage-1 prompts cover only the original healthcare-practice families
+    /// (Lease/Nda/Employment/CallCoverage); everything else lands on
+    /// Stage1_Generic. Kept separate from <see cref="ResolveFamily"/> so the
+    /// Counsel's-Memo overlays can ship without forcing a Stage-1 prompt
+    /// rewrite for every new candidate type.
+    /// </summary>
+    public static string ResolveStage1Family(string candidateType) => candidateType switch
+    {
+        "lease" or "lease_amendment" or "lease_loi" or "sublease" => "Lease",
+        "nda" => "Nda",
+        "employee_agreement" or "amendment" => "Employment",
+        "call_coverage_agreement" => "CallCoverage",
         _ => "Generic"
     };
 
     public static string LoadStage1(string candidateType) =>
-        Load($"Stage1_{ResolveFamily(candidateType)}");
+        Load($"Stage1_{ResolveStage1Family(candidateType)}");
 
     public static string LoadStage2(string candidateType) =>
-        Load($"Stage2_{ResolveFamily(candidateType)}");
+        Load($"Stage2_{ResolveStage1Family(candidateType)}");
 
     public static string LoadStage3() => Load("Stage3_Portfolio");
 
