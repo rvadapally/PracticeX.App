@@ -40,6 +40,7 @@ public static class LegalAdvisorEndpoint
         group.MapPost("/memos/{assetId:guid}", GenerateMemo).WithName("GenerateLegalMemo");
         group.MapGet("/memos/{assetId:guid}", GetMemo).WithName("GetLegalMemo");
         group.MapPost("/memos-batch", BatchGenerateMemos).WithName("BatchGenerateLegalMemos");
+        group.MapPost("/memos/{assetId:guid}/retry-json", RetryMemoJson).WithName("RetryLegalMemoJson");
         group.MapGet("/portfolio", GetMemoPortfolio).WithName("GetLegalMemoPortfolio");
         group.MapPost("/counsel-brief", GenerateCounselBrief).WithName("GenerateCounselBrief");
         group.MapGet("/counsel-brief", GetCounselBrief).WithName("GetCounselBrief");
@@ -292,6 +293,87 @@ public static class LegalAdvisorEndpoint
             TotalTokensOut: totalOut,
             LatencyMs: sw.ElapsedMilliseconds,
             Notes: null));
+    }
+
+    /// <summary>
+    /// Re-runs Stage B (JSON extraction) only against the saved markdown
+    /// memo. Useful when Stage B failed transiently (rate limit, OpenRouter
+    /// 400 from concurrent calls) but the Stage A markdown is good — saves
+    /// re-paying Stage A's ~$0.025 + 2 minutes per doc.
+    /// </summary>
+    private static async Task<Results<Ok<LegalMemoResult>, NotFound, BadRequest<ProblemSummary>>> RetryMemoJson(
+        Guid assetId,
+        PracticeXDbContext db,
+        IDocumentLanguageModel llm,
+        ICurrentUserContext userContext,
+        ILogger<LegalAdvisorMarker> logger,
+        CancellationToken cancellationToken)
+    {
+        if (!llm.IsConfigured)
+        {
+            return TypedResults.BadRequest(new ProblemSummary("llm_not_configured", "LLM provider isn't configured."));
+        }
+
+        var asset = await db.DocumentAssets
+            .FirstOrDefaultAsync(a => a.Id == assetId && a.TenantId == userContext.TenantId, cancellationToken);
+        if (asset is null) return TypedResults.NotFound();
+        if (string.IsNullOrEmpty(asset.LegalMemoMd))
+        {
+            return TypedResults.BadRequest(new ProblemSummary("no_memo_md",
+                "No Stage-A memo markdown to extract from. Run POST /memos/{id} first."));
+        }
+
+        var stageBTpl = PromptLoader.LoadLegalMemoJson();
+        var stageBPrompt = PromptLoader.Render(stageBTpl, new Dictionary<string, string>
+        {
+            ["LEGAL_MEMO"] = asset.LegalMemoMd
+        });
+
+        try
+        {
+            var stageBResp = await llm.CompleteAsync(new LanguageModelRequest
+            {
+                System = SystemPromptStageB,
+                Messages = [new LanguageModelMessage(LanguageModelRoles.User, stageBPrompt)],
+                MaxTokens = StageBMaxTokens,
+                Temperature = StageBTemperature,
+                JsonSchema = "{}",
+                Purpose = "legal-memo-extract-retry"
+            }, cancellationToken);
+
+            var json = ExtractJson(stageBResp.Text);
+            if (string.IsNullOrEmpty(json))
+            {
+                asset.LegalMemoStatus = "partial";
+                await db.SaveChangesAsync(cancellationToken);
+                return TypedResults.BadRequest(new ProblemSummary("stage_b_unparseable",
+                    "Stage B response did not contain a parseable JSON object."));
+            }
+
+            asset.LegalMemoJson = json;
+            asset.LegalMemoTokensIn = (asset.LegalMemoTokensIn ?? 0) + stageBResp.TokensIn;
+            asset.LegalMemoTokensOut = (asset.LegalMemoTokensOut ?? 0) + stageBResp.TokensOut;
+            var jsonRisk = ParseRiskScore(json);
+            if (jsonRisk.HasValue) asset.LegalMemoRiskScore = jsonRisk;
+            asset.LegalMemoStatus = "completed";
+            asset.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+
+            return TypedResults.Ok(new LegalMemoResult(
+                Status: "completed",
+                Model: stageBResp.Model,
+                RiskScore: asset.LegalMemoRiskScore,
+                TokensIn: stageBResp.TokensIn,
+                TokensOut: stageBResp.TokensOut,
+                LatencyMs: stageBResp.LatencyMs,
+                MemoMd: asset.LegalMemoMd,
+                MemoJson: json));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Stage B retry failed for asset {AssetId}", assetId);
+            return TypedResults.BadRequest(new ProblemSummary("stage_b_failed", ex.Message));
+        }
     }
 
     // ------------------------------------------------------------------
@@ -602,22 +684,42 @@ public static class LegalAdvisorEndpoint
         asset.LegalMemoExtractedAt = DateTimeOffset.UtcNow;
         asset.LegalMemoLatencyMs = (int)stageASw.ElapsedMilliseconds;
 
+        // Backstop: parse risk score from the markdown's "Risk Score: N / 100"
+        // line so portfolio sorting works even when Stage B fails. Stage B's
+        // structured JSON gives the better signal, but markdown is the
+        // authoritative artifact and must surface a sortable score.
+        asset.LegalMemoRiskScore = ParseRiskScoreFromMarkdown(memoMd);
+
         // ---- Stage B: JSON extraction from memo ----
+        // Wrapped in try/catch so a transient OpenRouter failure (rate limit,
+        // 400 from concurrent calls, model glitch) leaves the memo md
+        // recoverable as 'partial' rather than stranding it on 'running'
+        // forever.
         var stageBTpl = PromptLoader.LoadLegalMemoJson();
         var stageBPrompt = PromptLoader.Render(stageBTpl, new Dictionary<string, string>
         {
             ["LEGAL_MEMO"] = memoMd
         });
 
-        var stageBResp = await llm.CompleteAsync(new LanguageModelRequest
+        LanguageModelResponse stageBResp;
+        try
         {
-            System = SystemPromptStageB,
-            Messages = [new LanguageModelMessage(LanguageModelRoles.User, stageBPrompt)],
-            MaxTokens = StageBMaxTokens,
-            Temperature = StageBTemperature,
-            JsonSchema = "{}",
-            Purpose = "legal-memo-extract"
-        }, cancellationToken);
+            stageBResp = await llm.CompleteAsync(new LanguageModelRequest
+            {
+                System = SystemPromptStageB,
+                Messages = [new LanguageModelMessage(LanguageModelRoles.User, stageBPrompt)],
+                MaxTokens = StageBMaxTokens,
+                Temperature = StageBTemperature,
+                JsonSchema = "{}",
+                Purpose = "legal-memo-extract"
+            }, cancellationToken);
+        }
+        catch
+        {
+            asset.LegalMemoStatus = "partial";
+            asset.UpdatedAt = DateTimeOffset.UtcNow;
+            return (stageAResp.TokensIn, stageAResp.TokensOut);
+        }
 
         var json = ExtractJson(stageBResp.Text);
         if (string.IsNullOrEmpty(json))
@@ -631,12 +733,28 @@ public static class LegalAdvisorEndpoint
         asset.LegalMemoJson = json;
         asset.LegalMemoTokensIn = (asset.LegalMemoTokensIn ?? 0) + stageBResp.TokensIn;
         asset.LegalMemoTokensOut = (asset.LegalMemoTokensOut ?? 0) + stageBResp.TokensOut;
-        asset.LegalMemoRiskScore = ParseRiskScore(json);
+        // Stage B's JSON risk_score wins over the markdown regex backstop.
+        var jsonRisk = ParseRiskScore(json);
+        if (jsonRisk.HasValue) asset.LegalMemoRiskScore = jsonRisk;
         asset.LegalMemoStatus = "completed";
         asset.UpdatedAt = DateTimeOffset.UtcNow;
 
         return (stageAResp.TokensIn + stageBResp.TokensIn,
                 stageAResp.TokensOut + stageBResp.TokensOut);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex RiskScoreLineRegex = new(
+        @"Risk\s*Score\s*:\s*(\d{1,3})\s*/\s*100",
+        System.Text.RegularExpressions.RegexOptions.Compiled |
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    private static decimal? ParseRiskScoreFromMarkdown(string memoMd)
+    {
+        if (string.IsNullOrWhiteSpace(memoMd)) return null;
+        var m = RiskScoreLineRegex.Match(memoMd);
+        if (!m.Success) return null;
+        if (int.TryParse(m.Groups[1].Value, out var n) && n >= 0 && n <= 100) return n;
+        return null;
     }
 
     // ------------------------------------------------------------------
