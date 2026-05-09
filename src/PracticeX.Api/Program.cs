@@ -115,6 +115,7 @@ app.MapOcrReprocessEndpoints();
 app.MapPortfolioBriefEndpoints();
 app.MapRenewalsEndpoints();
 app.MapEntityGraphEndpoints();
+app.MapLegalAdvisorEndpoints();
 app.MapAnalyticsEndpoints();
 
 // Demo seed: creates the default tenant + user the demo current-user resolver

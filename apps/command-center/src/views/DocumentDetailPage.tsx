@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button, Card, ConfidenceBar, StatusChip } from '@practicex/design-system';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   analysisApi,
+  legalAdvisorApi,
+  parseLegalMemoJson,
   type DocumentDetail,
   type ExtractedField,
+  type LegalMemoIssue,
+  type LegalMemoResult,
+  type LegalMemoStructured,
   readableCandidateType,
 } from '../lib/api';
 import { logEvent } from '../lib/analytics';
+import { LegalDisclaimer } from '../components/LegalDisclaimer';
 import { MaintenancePage } from '../shell/MaintenanceMessage';
 
-type RightPaneTab = 'brief' | 'fields';
+type RightPaneTab = 'brief' | 'fields' | 'memo';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
 
@@ -23,11 +29,18 @@ type LoadState =
 
 export function DocumentDetailPage() {
   const { assetId } = useParams<{ assetId: string }>();
+  const [searchParams] = useSearchParams();
+  const initialTab = (searchParams.get('tab') as RightPaneTab) || 'brief';
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [reloadKey, setReloadKey] = useState(0);
-  const [tab, setTab] = useState<RightPaneTab>('brief');
+  const [tab, setTab] = useState<RightPaneTab>(
+    initialTab === 'memo' || initialTab === 'fields' || initialTab === 'brief' ? initialTab : 'brief',
+  );
   const [activeCitation, setActiveCitation] = useState<string | null>(null);
   const [flashKey, setFlashKey] = useState(0);
+  const [memo, setMemo] = useState<LegalMemoResult | null>(null);
+  const [memoLoading, setMemoLoading] = useState(false);
+  const [memoError, setMemoError] = useState<string | null>(null);
   const snippetRef = useRef<HTMLPreElement>(null);
 
   function focusCitation(citation: string) {
@@ -62,11 +75,34 @@ export function DocumentDetailPage() {
         if (cancelled) return;
         setState({ kind: 'error' });
       }
+      // Best-effort memo load. 404 is the common "not generated yet" path.
+      try {
+        const m = await legalAdvisorApi.getMemo(assetId);
+        if (!cancelled) setMemo(m);
+      } catch {
+        // ignore
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, [assetId, reloadKey]);
+
+  async function generateMemo() {
+    if (!assetId) return;
+    setMemoLoading(true);
+    setMemoError(null);
+    logEvent('legal_memo_generate_clicked', { assetId });
+    try {
+      const m = await legalAdvisorApi.generateMemo(assetId);
+      setMemo(m);
+    } catch (err) {
+      const detail = (err as { detail?: string }).detail;
+      setMemoError(detail ?? 'Counsel memo generation failed');
+    } finally {
+      setMemoLoading(false);
+    }
+  }
 
   const sourceUrl = useMemo(() => {
     if (!assetId) return null;
@@ -201,17 +237,26 @@ export function DocumentDetailPage() {
             briefAt={detail.narrativeExtractedAt}
             hasLlm={hasLlm}
             fieldCount={fields.length}
+            hasMemo={!!memo}
+            memoRiskScore={memo?.riskScore ?? null}
           />
           <div className="right-pane-body">
             {tab === 'brief' ? (
               <BriefPane detail={detail} />
-            ) : (
+            ) : tab === 'fields' ? (
               <FieldsPane
                 detail={detail}
                 fields={fields}
                 hasLlm={hasLlm}
                 onCitationClick={focusCitation}
                 activeCitation={activeCitation}
+              />
+            ) : (
+              <MemoPane
+                memo={memo}
+                onGenerate={generateMemo}
+                loading={memoLoading}
+                error={memoError}
               />
             )}
           </div>
@@ -229,6 +274,8 @@ function RightPaneTabs({
   briefAt,
   hasLlm,
   fieldCount,
+  hasMemo,
+  memoRiskScore,
 }: {
   tab: RightPaneTab;
   onTabChange: (t: RightPaneTab) => void;
@@ -237,6 +284,8 @@ function RightPaneTabs({
   briefAt: string | null;
   hasLlm: boolean;
   fieldCount: number;
+  hasMemo: boolean;
+  memoRiskScore: number | null;
 }) {
   return (
     <div className="right-pane-tabs">
@@ -264,8 +313,216 @@ function RightPaneTabs({
           {hasLlm ? ' · LLM' : ''}
         </span>
       </button>
+      <button
+        className={`right-pane-tab ${tab === 'memo' ? 'is-active' : ''}`}
+        onClick={() => onTabChange('memo')}
+      >
+        <span className="right-pane-tab-label">Counsel's Memo</span>
+        <span className="right-pane-tab-meta">
+          {hasMemo ? (
+            memoRiskScore != null ? (
+              <span>Risk {Math.round(Number(memoRiskScore))}/100</span>
+            ) : (
+              'generated'
+            )
+          ) : (
+            <span className="muted">premium · not yet generated</span>
+          )}
+        </span>
+      </button>
     </div>
   );
+}
+
+function MemoPane({
+  memo,
+  onGenerate,
+  loading,
+  error,
+}: {
+  memo: LegalMemoResult | null;
+  onGenerate: () => Promise<void>;
+  loading: boolean;
+  error: string | null;
+}) {
+  const structured = useMemo<LegalMemoStructured | null>(
+    () => (memo ? parseLegalMemoJson(memo.memoJson) : null),
+    [memo],
+  );
+
+  if (!memo && !loading) {
+    return (
+      <div className="memo-pane">
+        <LegalDisclaimer />
+        <div className="muted brief-empty">
+          <div style={{ fontSize: 14, marginBottom: 8 }}>
+            No Counsel's Memo generated yet for this document.
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 14 }}>
+            The Counsel's Memo is a premium General-Counsel-grade analysis:
+            issue register with severity, proposed redlines, material
+            disclosures (board / insurer / lender / M&A / regulator), and
+            a 0–100 risk score sortable across the portfolio.
+          </div>
+          <Button onClick={onGenerate}>Generate Counsel's Memo</Button>
+          {error ? (
+            <div style={{ marginTop: 10, color: 'var(--px-red, #b00020)', fontSize: 12 }}>
+              {error}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (loading && !memo) {
+    return (
+      <div className="memo-pane">
+        <div className="muted">Composing Counsel's Memo… (~10–20 sec)</div>
+      </div>
+    );
+  }
+
+  if (!memo) return null;
+
+  return (
+    <div className="memo-pane">
+      <LegalDisclaimer />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          marginBottom: 14,
+          flexWrap: 'wrap',
+        }}
+      >
+        {memo.riskScore != null ? (
+          <RiskScorePill score={Number(memo.riskScore)} rating={structured?.risk_rating ?? null} />
+        ) : null}
+        <div className="muted" style={{ fontSize: 11 }}>
+          {memo.model?.split('/').pop() ?? 'AI'} · {memo.tokensIn + memo.tokensOut} tokens · {memo.latencyMs}ms
+        </div>
+        <div style={{ marginLeft: 'auto' }}>
+          <Button variant="secondary" onClick={onGenerate} disabled={loading}>
+            {loading ? 'Regenerating…' : 'Regenerate'}
+          </Button>
+        </div>
+      </div>
+
+      {structured?.issues && structured.issues.length > 0 ? (
+        <IssueRegister issues={structured.issues} />
+      ) : null}
+
+      <article className="brief-prose" style={{ marginTop: 18 }}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{memo.memoMd}</ReactMarkdown>
+      </article>
+    </div>
+  );
+}
+
+function IssueRegister({ issues }: { issues: LegalMemoIssue[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="eyebrow" style={{ fontSize: 11 }}>
+        Top issues ({issues.length})
+      </div>
+      {issues.slice(0, 8).map((issue) => (
+        <div
+          key={issue.rank}
+          style={{
+            border: '1px solid var(--px-border, #e2e2e2)',
+            borderLeft: `3px solid ${severityColor(issue.severity)}`,
+            background: 'rgba(0,0,0,0.015)',
+            borderRadius: 6,
+            padding: '10px 12px',
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: 0.4,
+                padding: '2px 6px',
+                borderRadius: 3,
+                background: severityColor(issue.severity),
+                color: '#fff',
+              }}
+            >
+              {issue.severity}
+            </span>
+            <span className="mono-label" style={{ fontSize: 10 }}>
+              {issue.category}
+            </span>
+            <strong style={{ fontSize: 13 }}>{issue.title}</strong>
+            {issue.where ? (
+              <span className="muted" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                {issue.where}
+              </span>
+            ) : null}
+          </div>
+          <div style={{ marginBottom: issue.non_standard_reason ? 4 : 0 }}>{issue.risk}</div>
+          {issue.non_standard_reason ? (
+            <div className="muted" style={{ fontSize: 12 }}>
+              <em>{issue.non_standard_reason}</em>
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function severityColor(severity: LegalMemoIssue['severity']): string {
+  switch (severity) {
+    case 'CRITICAL':
+      return '#7d0000';
+    case 'HIGH':
+      return '#cc3333';
+    case 'MEDIUM':
+      return '#d4631e';
+    case 'LOW':
+      return '#1d6f42';
+    default:
+      return '#666';
+  }
+}
+
+function RiskScorePill({ score, rating }: { score: number; rating: string | null }) {
+  const tone = riskTone(score);
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 12px',
+        borderRadius: 8,
+        background: tone.bg,
+        border: `1px solid ${tone.border}`,
+        color: tone.fg,
+      }}
+    >
+      <span style={{ fontWeight: 800, fontSize: 18 }}>{Math.round(score)}</span>
+      <span style={{ fontSize: 11, opacity: 0.7 }}>/ 100</span>
+      {rating ? (
+        <span className="mono-label" style={{ fontSize: 10, marginLeft: 4 }}>
+          {rating.toUpperCase()}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function riskTone(score: number) {
+  if (score >= 81) return { bg: '#fde2e2', fg: '#7d0000', border: '#cc3333' };
+  if (score >= 61) return { bg: '#ffe7d3', fg: '#7a3a00', border: '#d4631e' };
+  if (score >= 41) return { bg: '#fff4d1', fg: '#5e4500', border: '#c8a02b' };
+  if (score >= 21) return { bg: '#e6f1ff', fg: '#1a3d6b', border: '#3a7bd5' };
+  return { bg: '#dff5e7', fg: '#1d6f42', border: '#1d6f42' };
 }
 
 function BriefPane({ detail }: { detail: DocumentDetail }) {

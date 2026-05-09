@@ -7,6 +7,7 @@ import { AppShell } from './shell/AppShell';
 import { CommandCenterPage } from './views/CommandCenterPage';
 import { DocumentDetailPage } from './views/DocumentDetailPage';
 import { EntityGraphPage } from './views/EntityGraphPage';
+import { LegalAdvisorPage } from './views/LegalAdvisorPage';
 import { PortfolioPage } from './views/PortfolioPage';
 import { RenewalsPage } from './views/RenewalsPage';
 import { ReviewQueuePage } from './views/ReviewQueuePage';
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
           <Route path="/portfolio/:assetId" element={<DocumentDetailPage />} />
           <Route path="/contracts" element={<CommandCenterPage />} />
           <Route path="/renewals" element={<RenewalsPage />} />
+          <Route path="/legal-advisor" element={<LegalAdvisorPage />} />
           <Route path="/graph" element={<EntityGraphPage />} />
           <Route path="/alerts" element={<CommandCenterPage />} />
           <Route path="/obligations" element={<CommandCenterPage />} />

@@ -290,6 +290,15 @@ export function readableCandidateType(type: string): string {
     call_coverage_agreement: 'Call coverage agreement',
     service_agreement: 'Service agreement',
     operational_data: 'Operational data',
+    board_resolution: 'Board resolution',
+    equity_grant: 'Equity grant',
+    ip_assignment: 'IP assignment',
+    corp_formation: 'Corporate formation',
+    regulatory_filing: 'Regulatory filing',
+    privacy_policy: 'Privacy policy',
+    terms_of_service: 'Terms of service',
+    term_sheet: 'Term sheet',
+    founders_meeting: 'Founders meeting',
     other: 'Other',
     unknown: 'Unclassified',
   }[type] ?? type;
@@ -525,6 +534,137 @@ export interface EntityGraph {
   links: EntityGraphLink[];
 }
 
+// Slice 20 — Legal Advisor Agent (premium "Counsel's Memo" surface)
+export interface LegalMemoResult {
+  status: string;
+  model: string;
+  riskScore: number | null;
+  tokensIn: number;
+  tokensOut: number;
+  latencyMs: number;
+  memoMd: string;
+  memoJson: string;
+}
+
+export interface LegalAdvisorPortfolioCounts {
+  total: number;
+  withMemo: number;
+  severe: number;
+  high: number;
+  elevated: number;
+  modest: number;
+  low: number;
+}
+
+export interface LegalAdvisorPortfolioRow {
+  documentAssetId: string;
+  fileName: string;
+  candidateType: string;
+  family: string;
+  isExecuted: boolean | null;
+  memoStatus: string | null;
+  riskScore: number | null;
+  riskRating: string | null;
+  headline: string | null;
+  topIssueTitle: string | null;
+  memoModel: string | null;
+  memoExtractedAt: string | null;
+}
+
+export interface LegalAdvisorPortfolio {
+  counts: LegalAdvisorPortfolioCounts;
+  rows: LegalAdvisorPortfolioRow[];
+  disclaimer: string;
+}
+
+export interface CounselBrief {
+  briefMd: string;
+  model: string | null;
+  sourceDocCount: number;
+  tokensIn: number;
+  tokensOut: number;
+  latencyMs: number;
+  generatedAt: string;
+  disclaimer: string;
+}
+
+export interface LegalMemoIssue {
+  rank: number;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  category: string;
+  title: string;
+  where: string;
+  risk: string;
+  non_standard_reason: string;
+}
+
+export interface LegalMemoRedline {
+  issue_rank: number;
+  current_language: string;
+  proposed_language: string;
+  rationale: string;
+}
+
+export interface LegalMemoActionItem {
+  rank: number;
+  owner: string;
+  action: string;
+  by: string;
+  why_now: string;
+  done_looks_like: string;
+}
+
+export interface LegalMemoStructured {
+  risk_score?: number;
+  risk_rating?: string;
+  headline?: string;
+  issues?: LegalMemoIssue[];
+  redlines?: LegalMemoRedline[];
+  operational_watch_items?: string[];
+  material_disclosures?: {
+    board?: string[];
+    insurer?: string[];
+    lender?: string[];
+    ma_due_diligence?: string[];
+    regulators?: string[];
+  };
+  counterparty_posture?: string;
+  action_items?: LegalMemoActionItem[];
+  plain_english_summary?: string;
+}
+
+export const legalAdvisorApi = {
+  getPortfolio: () =>
+    request<LegalAdvisorPortfolio>(`/legal-advisor/portfolio?_t=${Date.now()}`),
+  getMemo: (assetId: string) =>
+    request<LegalMemoResult>(`/legal-advisor/memos/${assetId}`),
+  generateMemo: (assetId: string) =>
+    request<LegalMemoResult>(`/legal-advisor/memos/${assetId}`, { method: 'POST' }),
+  batchGenerate: (force = false) =>
+    request<BatchExtractionResult>(
+      `/legal-advisor/memos-batch${force ? '?force=true' : ''}`,
+      { method: 'POST' },
+    ),
+  getCounselBrief: () =>
+    request<CounselBrief>(`/legal-advisor/counsel-brief?_t=${Date.now()}`),
+  generateCounselBrief: () =>
+    request<CounselBrief>('/legal-advisor/counsel-brief', { method: 'POST' }),
+};
+
+export function parseLegalMemoJson(memoJson: string): LegalMemoStructured | null {
+  try {
+    return JSON.parse(memoJson) as LegalMemoStructured;
+  } catch {
+    return null;
+  }
+}
+
+export const LEGAL_ADVISOR_DISCLAIMER =
+  'AI-generated legal analysis for informational purposes only. ' +
+  'This is not legal advice and does not establish an attorney-client ' +
+  'relationship. Engage licensed counsel before relying on any ' +
+  'conclusion or taking action based on this output.';
+
 export const analysisApi = {
   getPortfolio: (facilityId?: string) =>
     request<Portfolio>(`/analysis/portfolio${facilityId ? `?facilityId=${encodeURIComponent(facilityId)}` : ''}`),
@@ -582,6 +722,12 @@ export function readableFamily(family: string): string {
     compliance: 'Compliance / BAA',
     fee_schedule: 'Fee schedules',
     operational_data: 'Operational records',
+    corp_governance: 'Board & corporate governance',
+    equity: 'Equity & financing',
+    ip: 'IP assignments',
+    corp_formation: 'Corporate formation',
+    regulatory: 'Regulatory filings',
+    policy: 'Public policies',
     unclassified: 'Unclassified',
   }[family] ?? family;
 }

@@ -1,7 +1,7 @@
 # PracticeX Command Center — Roadmap & Workflow
 
 Single-source-of-truth document for "where are we, what's next, why does it matter."
-Last updated: 2026-05-02 (commit `dc8e638`).
+Last updated: 2026-05-09 (Slice 20 — Legal Advisor Agent).
 
 ---
 
@@ -124,6 +124,46 @@ These are demo-blockers Parag will notice. Knock out before sharing the URL wide
 ## Phase 3 — Premium features
 
 Each of these reads from the same data spine and adds a new operational surface. Order is roughly priority for the board demo and post-Parag rollout.
+
+### ⭐⭐⭐ Legal Advisor Agent — Slice 20 (shipped 2026-05-09)
+A dedicated General-Counsel pass over every contract — separate from the
+Document Intelligence Brief, premium-tier surface with a non-negotiable
+"not legal advice" disclaimer.
+
+- **Per-doc Counsel's Memo** (markdown + structured JSON):
+  posture snapshot with 0–100 risk score, issue register (CRITICAL/HIGH/
+  MEDIUM/LOW × 17 categories), proposed redlines with concrete language,
+  material disclosures (board / insurer / lender / M&A diligence /
+  regulators), counterparty posture, action items, plain-English summary.
+- **Family overlays**: Lease, NDA, Employment, CallCoverage, Generic —
+  each with its own corporate-law issue checklist (M&A reps, governance
+  protective provisions, IP assignment, change-of-control, indemnity
+  caps, anti-assignment, drag/tag/ROFR, escalators, exclusivity, BAA,
+  Stark, AKS).
+- **Counsel's Brief** (cross-document): partner-counsel synthesis at
+  board-grade — risk heatmap, top 10 cross-document risks, material
+  disclosure posture, counterparty concentration, compliance posture,
+  negotiation calendar.
+- **Endpoints**: `POST/GET /api/legal-advisor/memos/{assetId}`,
+  `POST /api/legal-advisor/memos-batch`, `GET /api/legal-advisor/portfolio`,
+  `POST/GET /api/legal-advisor/counsel-brief`. Two-stage Sonnet 4.6 via
+  OpenRouter (markdown then strict JSON) — same posture as existing
+  brief/extract pipeline.
+- **UI**: `/legal-advisor` portfolio page (sortable by risk score) +
+  "Counsel's Memo" tab on `/portfolio/{id}` + `LegalDisclaimer` banner
+  on every memo surface. Sidebar entry under Workspace.
+- **DB**: migration `20260509_legal_memo.sql` adds memo columns to
+  `doc.document_assets` + new `doc.counsel_briefs` table. Idempotent.
+- **Why it differs from existing Stage 1 brief**: the brief *describes*
+  what's in the contract (sectioned narrative for a practice owner). The
+  memo takes an adversarial GC posture — landmines, redlines, disclosure
+  triggers, sortable risk score. Same documents, different audience and
+  product tier.
+- **Files**: `src/PracticeX.Api/Analysis/LegalAdvisorEndpoint.cs`,
+  `src/PracticeX.Api/Analysis/Prompts/LegalMemo_*.md`,
+  `apps/command-center/src/views/LegalAdvisorPage.tsx`,
+  `apps/command-center/src/components/LegalDisclaimer.tsx`,
+  document-detail tab in `DocumentDetailPage.tsx`.
 
 ### ⭐⭐⭐ Renewal Engine — board-demo signature feature
 - Compute `end_date` from `effective_date + term_months`.
@@ -269,12 +309,17 @@ See `~/.claude/projects/.../memory/project_eagle_gi_strategic_findings.md` for t
 | 13 | OpenRouter LLM extraction (Claude) | `7daa64e` |
 | 14 | Vertical field-card layout + Sonnet 4.6 | `1252af7` |
 | 15 | Batch LLM + same-origin proxy + LLM-cleaned insights | `5e739b4` |
+| 16 | Two-stage LLM (narrative brief + JSON extract) | `dc8e638`-ish |
+| 17 | Entity Graph (`/graph`) | post-15 |
+| 18 | Canonical headline fields + citation anchors | post-15 |
+| 19 | Renewal Engine (`/renewals`) | post-15 |
+| 20 | Legal Advisor Agent (Counsel's Memo + Brief, premium) | this slice |
 
 ---
 
 ## Where to find things
 
-- API endpoints: `src/PracticeX.Api/Analysis/AnalysisEndpoints.cs` + `LlmExtractionEndpoint.cs` + `SourceDiscovery/SourceDiscoveryEndpoints.cs`
+- API endpoints: `src/PracticeX.Api/Analysis/AnalysisEndpoints.cs` + `LlmExtractionEndpoint.cs` + `LegalAdvisorEndpoint.cs` + `SourceDiscovery/SourceDiscoveryEndpoints.cs`
 - Pipeline orchestration: `src/PracticeX.Infrastructure/SourceDiscovery/Ingestion/IngestionOrchestrator.cs`
 - Extractors: `src/PracticeX.Discovery/FieldExtraction/*Extractor.cs`
 - Schemas: `src/PracticeX.Discovery/Schemas/*SchemaV1.cs`

@@ -73,6 +73,20 @@ public sealed class DocumentAsset : Entity
     public decimal? LlmNarrativeTemperature { get; set; }
     public string? LlmNarrativeStatus { get; set; }
     public int? LlmNarrativeLatencyMs { get; set; }
+
+    // Slice 20: Counsel's Memo — premium "Legal Advisor Agent" surface.
+    // Adversarial corporate-counsel posture: issue spotting, redline
+    // suggestions, material-disclosure flags, risk score. Distinct from
+    // the Stage-1 narrative brief: the brief describes; the memo recommends.
+    public string? LegalMemoMd { get; set; }
+    public string? LegalMemoJson { get; set; }                  // jsonb { issues:[], redlines:[], disclosures:[], risk_score, ... }
+    public string? LegalMemoModel { get; set; }
+    public int? LegalMemoTokensIn { get; set; }
+    public int? LegalMemoTokensOut { get; set; }
+    public DateTimeOffset? LegalMemoExtractedAt { get; set; }
+    public string? LegalMemoStatus { get; set; }
+    public int? LegalMemoLatencyMs { get; set; }
+    public decimal? LegalMemoRiskScore { get; set; }            // 0-100, sortable for portfolio triage
 }
 
 public static class ComplexityTierCodes

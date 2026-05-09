@@ -32,6 +32,17 @@ public static class PromptLoader
 
     public static string LoadStage3() => Load("Stage3_Portfolio");
 
+    /// <summary>
+    /// Slice 20: Counsel's Memo prompts. Master prompt is the same across
+    /// families; the family-specific overlay is injected as a section into
+    /// the master template.
+    /// </summary>
+    public static string LoadLegalMemoMaster() => Load("LegalMemo_Master");
+    public static string LoadLegalMemoFamilyOverlay(string candidateType) =>
+        Load($"LegalMemo_{ResolveFamily(candidateType)}");
+    public static string LoadLegalMemoJson() => Load("LegalMemo_Json");
+    public static string LoadCounselBrief() => Load("CounselBrief");
+
     private static string Load(string baseName)
     {
         return _cache.GetOrAdd(baseName, name =>

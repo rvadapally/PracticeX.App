@@ -23,6 +23,7 @@ public class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : 
     public DbSet<DocumentAsset> DocumentAssets => Set<DocumentAsset>();
     public DbSet<DocumentCandidate> DocumentCandidates => Set<DocumentCandidate>();
     public DbSet<PortfolioBrief> PortfolioBriefs => Set<PortfolioBrief>();
+    public DbSet<CounselBrief> CounselBriefs => Set<CounselBrief>();
     public DbSet<Counterparty> Counterparties => Set<Counterparty>();
     public DbSet<ContractRecord> Contracts => Set<ContractRecord>();
     public DbSet<ContractField> ContractFields => Set<ContractField>();
@@ -212,6 +213,13 @@ public class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : 
             entity.Property(x => x.LlmNarrativeModel).HasMaxLength(120);
             entity.Property(x => x.LlmNarrativeStatus).HasMaxLength(40);
             entity.Property(x => x.LlmNarrativeTemperature).HasColumnType("numeric(3,2)");
+
+            // Slice 20: Counsel's Memo (Legal Advisor Agent — premium surface).
+            entity.Property(x => x.LegalMemoMd).HasColumnType("text");
+            entity.Property(x => x.LegalMemoJson).HasColumnType("jsonb");
+            entity.Property(x => x.LegalMemoModel).HasMaxLength(120);
+            entity.Property(x => x.LegalMemoStatus).HasMaxLength(40);
+            entity.Property(x => x.LegalMemoRiskScore).HasColumnType("numeric(5,2)");
         });
 
         modelBuilder.Entity<DocumentCandidate>(entity =>
@@ -235,6 +243,14 @@ public class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : 
         modelBuilder.Entity<PortfolioBrief>(entity =>
         {
             entity.ToTable("portfolio_briefs", "doc");
+            entity.HasKey(x => x.TenantId);
+            entity.Property(x => x.BriefMd).HasColumnType("text").IsRequired();
+            entity.Property(x => x.Model).HasMaxLength(120);
+        });
+
+        modelBuilder.Entity<CounselBrief>(entity =>
+        {
+            entity.ToTable("counsel_briefs", "doc");
             entity.HasKey(x => x.TenantId);
             entity.Property(x => x.BriefMd).HasColumnType("text").IsRequired();
             entity.Property(x => x.Model).HasMaxLength(120);
