@@ -34,6 +34,10 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
 {
     private const string CloudflareEmailHeader = "Cf-Access-Authenticated-User-Email";
     private const string ImpersonateHeader = "X-Impersonate-Email";
+    // Slice 21 Phase 2: super-admins switch tenant context with this header.
+    // Ignored for non-super-admin callers — their tenant_id is fixed by
+    // their AppUser row.
+    private const string TenantOverrideHeader = "X-Tenant-Override";
 
     private static readonly Guid DemoTenantId = new("11111111-1111-1111-1111-111111111111");
     private static readonly Guid DemoUserId = new("22222222-2222-2222-2222-222222222222");
@@ -95,7 +99,15 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
 
         if (user.IsSuperAdmin)
         {
-            return new ResolvedUser(user.TenantId, user.Id, IsSuperAdmin: true, IsOrgAdmin: false, null);
+            // Phase 2 — tenant switching: super-admin can override the
+            // active tenant context with X-Tenant-Override. The header
+            // value must reference an existing tenant row; otherwise
+            // fall back to the user's home tenant. Without an override,
+            // super-admin defaults to their home tenant (which after the
+            // tenant split is the platform tenant — empty of docs by
+            // design, prompts the UI to surface a tenant-picker).
+            var effectiveTenant = ResolveTenantOverride(user.TenantId);
+            return new ResolvedUser(effectiveTenant, user.Id, IsSuperAdmin: true, IsOrgAdmin: false, null);
         }
 
         // Compute access set from role assignments. Org admin = any active
@@ -123,6 +135,24 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
         // No assignments = no access. Return an empty set, not null — null
         // means "unrestricted" for org/super admins.
         return new ResolvedUser(user.TenantId, user.Id, IsSuperAdmin: false, IsOrgAdmin: false, facilityIds);
+    }
+
+    /// <summary>
+    /// Returns the tenant id the super-admin is currently viewing. If they
+    /// passed a valid X-Tenant-Override header it wins; otherwise we use
+    /// their home tenant (the platform tenant, post-split). Invalid override
+    /// values silently fall back — better than 4xxing every API call when
+    /// the cookie is stale.
+    /// </summary>
+    private Guid ResolveTenantOverride(Guid homeTenantId)
+    {
+        var ctx = _httpContextAccessor.HttpContext;
+        if (ctx is null) return homeTenantId;
+        var raw = HeaderValue(ctx, TenantOverrideHeader);
+        if (string.IsNullOrWhiteSpace(raw)) return homeTenantId;
+        if (!Guid.TryParse(raw, out var requested)) return homeTenantId;
+        var exists = _db.Tenants.AsNoTracking().Any(t => t.Id == requested);
+        return exists ? requested : homeTenantId;
     }
 
     private string? ResolveEmail()

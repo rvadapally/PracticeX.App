@@ -35,13 +35,44 @@ function attemptAuthReload(): boolean {
   return true;
 }
 
+/**
+ * Slice 21 Phase 2: super-admin tenant context.
+ *
+ * Persisted in localStorage so it survives reloads. Injected as
+ * X-Tenant-Override on every API call. Backend ignores the header for
+ * non-super-admin callers (their tenant_id is fixed by their AppUser row),
+ * so it's safe to send unconditionally.
+ */
+const TENANT_OVERRIDE_STORAGE_KEY = 'pcc:tenant-override';
+
+export function getTenantOverride(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(TENANT_OVERRIDE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setTenantOverride(tenantId: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (tenantId) window.localStorage.setItem(TENANT_OVERRIDE_STORAGE_KEY, tenantId);
+    else window.localStorage.removeItem(TENANT_OVERRIDE_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
+  const tenantOverride = getTenantOverride();
   try {
     res = await fetch(`${API_BASE}${path}`, {
       headers: {
         Accept: 'application/json',
         ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+        ...(tenantOverride ? { 'X-Tenant-Override': tenantOverride } : {}),
         ...(init.headers ?? {}),
       },
       // Must be 'include' — Cloudflare Access redirects unauthenticated
@@ -513,6 +544,13 @@ export interface CurrentUser {
   accessibleFacilityIds: string[] | null;  // null = unrestricted in tenant
 }
 
+/** Slice 21 Phase 2: tenant context for super-admin org switching. */
+export interface TenantSummary {
+  id: string;
+  name: string;
+  status: string;
+}
+
 export interface Facility {
   id: string;
   code: string;
@@ -728,6 +766,7 @@ export const analysisApi = {
   getDashboard: () => request<DashboardStats>('/analysis/dashboard'),
   getReviewQueue: () => request<ReviewQueueItem[]>('/analysis/review-queue'),
   getCurrentUser: () => request<CurrentUser>('/analysis/me'),
+  getAccessibleTenants: () => request<TenantSummary[]>('/analysis/tenants'),
   getFacilities: () => request<Facility[]>('/analysis/facilities'),
   llmExtract: (assetId: string) =>
     request<LlmExtractionResult>(`/analysis/documents/${assetId}/llm-extract`, { method: 'POST' }),

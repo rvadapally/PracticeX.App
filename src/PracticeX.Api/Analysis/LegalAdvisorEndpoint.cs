@@ -685,16 +685,9 @@ public static class LegalAdvisorEndpoint
         ICurrentUserContext userContext,
         CancellationToken cancellationToken)
     {
-        // Slice 21 RBAC: counsel_briefs is keyed per-tenant only — until
-        // tenant split (Phase 2) lands, a facility-scoped user reading the
-        // cached brief could see another facility's synthesis. Force them
-        // to regenerate by hiding the cached row. Super/org admins still
-        // see the cached brief.
-        if (!userContext.IsSuperAdmin && !userContext.IsOrgAdmin)
-        {
-            return TypedResults.NotFound();
-        }
-
+        // (Phase 2: tenant split has shipped, so the per-tenant counsel
+        // brief is naturally scoped — facility users in their own tenant
+        // see only their org's brief. Phase 1 hack removed.)
         var brief = await db.CounselBriefs
             .FirstOrDefaultAsync(b => b.TenantId == userContext.TenantId, cancellationToken);
         if (brief is null) return TypedResults.NotFound();

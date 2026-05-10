@@ -29,6 +29,7 @@ public static class AnalysisEndpoints
         group.MapGet("/dashboard", GetDashboard).WithName("GetDashboard");
         group.MapGet("/review-queue", GetReviewQueue).WithName("GetReviewQueue");
         group.MapGet("/me", GetCurrentUser).WithName("GetCurrentUser");
+        group.MapGet("/tenants", GetAccessibleTenants).WithName("GetAccessibleTenants");
         group.MapGet("/facilities", GetFacilities).WithName("GetFacilities");
 
         return routes;
@@ -213,6 +214,28 @@ public static class AnalysisEndpoints
             IsSuperAdmin: userContext.IsSuperAdmin,
             AccessibleFacilityIds: facilityIds
         ));
+    }
+
+    /// <summary>
+    /// Slice 21 Phase 2: list of tenants the current user can switch into.
+    /// Super-admin sees every tenant; everyone else sees their home tenant
+    /// only. Frontend renders this as the org-switcher dropdown.
+    /// </summary>
+    private static async Task<Ok<IReadOnlyList<TenantSummary>>> GetAccessibleTenants(
+        PracticeXDbContext db,
+        ICurrentUserContext userContext,
+        CancellationToken cancellationToken)
+    {
+        IQueryable<Domain.Organization.Tenant> q = db.Tenants;
+        if (!userContext.IsSuperAdmin)
+        {
+            q = q.Where(t => t.Id == userContext.TenantId);
+        }
+        var rows = await q
+            .OrderBy(t => t.Name)
+            .Select(t => new TenantSummary(t.Id, t.Name, t.Status))
+            .ToListAsync(cancellationToken);
+        return TypedResults.Ok((IReadOnlyList<TenantSummary>)rows);
     }
 
     private static async Task<Ok<IReadOnlyList<FacilitySummary>>> GetFacilities(
@@ -1056,6 +1079,11 @@ public sealed record FacilitySummary(
     string Name,
     string Status,
     int DocumentCount);
+
+public sealed record TenantSummary(
+    Guid Id,
+    string Name,
+    string Status);
 
 /// <summary>
 /// Reads the canonical-headline JSON written by Stage-2 LLM extraction and

@@ -17,7 +17,15 @@ import {
   Zap,
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { analysisApi, type CurrentUser, type DashboardStats, type Facility } from '../lib/api';
+import {
+  analysisApi,
+  getTenantOverride,
+  setTenantOverride,
+  type CurrentUser,
+  type DashboardStats,
+  type Facility,
+  type TenantSummary,
+} from '../lib/api';
 import { logEvent, logPageView } from '../lib/analytics';
 
 type WorkspaceItem = {
@@ -51,6 +59,7 @@ export function AppShell() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [shellLoaded, setShellLoaded] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -68,15 +77,17 @@ export function AppShell() {
     let cancelled = false;
     (async () => {
       try {
-        const [u, s, f] = await Promise.all([
+        const [u, s, f, t] = await Promise.all([
           analysisApi.getCurrentUser().catch(() => null),
           analysisApi.getDashboard().catch(() => null),
           analysisApi.getFacilities().catch(() => []),
+          analysisApi.getAccessibleTenants().catch(() => []),
         ]);
         if (cancelled) return;
         if (u) setUser(u);
         if (s) setStats(s);
         if (f) setFacilities(f);
+        if (t) setTenants(t);
       } catch {
         // Sidebar gracefully degrades when API isn't reachable yet.
       } finally {
@@ -87,6 +98,15 @@ export function AppShell() {
       cancelled = true;
     };
   }, []);
+
+  // Slice 21 Phase 2: super-admin org-switcher.
+  const onTenantSwitch = (tenantId: string) => {
+    setTenantOverride(tenantId === '' ? null : tenantId);
+    logEvent('tenant_switch', { tenantId });
+    // Hard reload so every component re-pulls under the new tenant.
+    window.location.reload();
+  };
+  const currentOverride = getTenantOverride();
 
   const workspaceItems: WorkspaceItem[] = [
     { to: '/dashboard', label: 'Command center', icon: Home },
@@ -125,6 +145,32 @@ export function AppShell() {
           <BrandMark />
           <span className="brand-name">PracticeX Command Center</span>
         </div>
+        {/* Slice 21 Phase 2: org switcher (super-admin only). */}
+        {user?.isSuperAdmin && tenants.length > 1 ? (
+          <select
+            value={currentOverride ?? ''}
+            onChange={(e) => onTenantSwitch(e.target.value)}
+            title="Switch organization context (super-admin)"
+            style={{
+              fontSize: 12,
+              padding: '4px 8px',
+              marginRight: 12,
+              border: '1px solid var(--px-border, #d4d4d4)',
+              borderRadius: 6,
+              background: 'rgba(212,99,30,0.05)',
+              color: 'var(--px-orange, #d4631e)',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <option value="">— Platform (default) —</option>
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <button
           className="facility-switch"
           type="button"
