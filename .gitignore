@@ -490,6 +490,7 @@ $RECYCLE.BIN/
 node_modules/
 dist/
 *.tsbuildinfo
+apps/animated-chart/out/
 
 # Local scratch / secrets — never commit
 docs/New folder/

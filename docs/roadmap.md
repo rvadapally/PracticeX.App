@@ -1,7 +1,7 @@
 # PracticeX Command Center — Roadmap & Workflow
 
 Single-source-of-truth document for "where are we, what's next, why does it matter."
-Last updated: 2026-05-09 (Slice 20 — Legal Advisor Agent).
+Last updated: 2026-05-10 (Slice 21 Phase 1 — RBAC + facility isolation).
 
 ---
 
@@ -313,7 +313,25 @@ See `~/.claude/projects/.../memory/project_eagle_gi_strategic_findings.md` for t
 | 17 | Entity Graph (`/graph`) | post-15 |
 | 18 | Canonical headline fields + citation anchors | post-15 |
 | 19 | Renewal Engine (`/renewals`) | post-15 |
-| 20 | Legal Advisor Agent (Counsel's Memo + Brief, premium) | this slice |
+| 20 | Legal Advisor Agent (Counsel's Memo + Brief, premium) | `749a1d7` |
+| 20.1 | Synexar / early-stage corporate family overlays (Equity, Governance, IpAssignment, CorpFormation, Regulatory, Policy) | `3fa2bf7` |
+| 20.2 | Stage B JSON failure recovery + retry-json endpoint | `4e39188` |
+| 21 (Phase 1) | RBAC + facility-level isolation (super_admin / org_admin / facility_user) | `4c25bd1` |
+| 21 (Phase 2) | Tenant split: Eagle + Synexar promoted to own tenants; org switcher | next |
+
+---
+
+## Synexar test results (2026-05-09 / 2026-05-10)
+
+End-to-end Legal Advisor batch over Synexar's 53-doc foundation corpus:
+
+- **49 completed + 1 partial** (markdown saved, JSON unparseable — recoverable via `/retry-json`).
+- **Risk distribution:** 0 severe / **37 high (61–80)** / 7 elevated / 6 modest / 0 low. Average **61.6 / 100**, max **74** (HIPAA BAA).
+- **Counsel's Brief synthesized 47 docs in 168 sec** (286K input tokens / 8K output, ~$0.85). Identified the company-defining risk thesis: HIPAA compliance vacuum (no executed BAA, no policy, no breach procedure) running into a Series A term sheet that requires HIPAA attestation as a hard closing condition. Cross-document linkage no single doc could surface.
+- Time-sensitive items the brief surfaced: **FinCEN BOIR update by May 31, 2026** (post share-gift), **Vadapally 83(b) reconstruction** (record missing).
+- Validated all 6 new Slice 20.1 family overlays at scale; risk-score calibration is well-distributed (no clustering).
+
+Sample artifacts (gitignored — local only): `synexar_memo_run.log`, `highest_risk_memo.md`, `sample_memo.md`, `synexar_counsel_brief.md`.
 
 ---
 
