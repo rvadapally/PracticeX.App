@@ -6,21 +6,67 @@ export interface ApiError {
   detail?: string;
 }
 
+// When Cloudflare Access expires the session (or invalidates it because
+// iCloud Private Relay's egress IP drifted), recovery is a top-level
+// navigation: Access redirects the document, OTP runs, SPA reloads with
+// a fresh cookie. Cooldown guards against reload loops if the API is
+// actually down — sessionStorage so the timestamp clears on a real
+// page-close, not on tab switches.
+const AUTH_RELOAD_TS_KEY = 'pcc:last-auth-reload';
+const AUTH_RELOAD_COOLDOWN_MS = 15_000;
+
+function attemptAuthReload(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return false;
+  let last = 0;
+  try {
+    last = Number(window.sessionStorage.getItem(AUTH_RELOAD_TS_KEY) ?? '0');
+  } catch {
+    /* sessionStorage may be blocked in some embedding contexts */
+  }
+  if (Date.now() - last < AUTH_RELOAD_COOLDOWN_MS) return false;
+  try {
+    window.sessionStorage.setItem(AUTH_RELOAD_TS_KEY, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+  window.location.reload();
+  return true;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      Accept: 'application/json',
-      ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-      ...(init.headers ?? {}),
-    },
-    // Must be 'include' — Cloudflare Access redirects unauthenticated
-    // requests cross-origin to truwit.cloudflareaccess.com/login. 'include'
-    // is the only mode where the browser carries cookies through that
-    // redirect so re-auth can complete; 'same-origin' breaks the OAuth
-    // flow and produces CORS errors on every call.
-    credentials: 'include',
-    ...init,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        Accept: 'application/json',
+        ...(init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+        ...(init.headers ?? {}),
+      },
+      // Must be 'include' — Cloudflare Access redirects unauthenticated
+      // requests cross-origin to truwit.cloudflareaccess.com/login. 'include'
+      // is the only mode where the browser carries cookies through that
+      // redirect so re-auth can complete; 'same-origin' breaks the OAuth
+      // flow and produces CORS errors on every call.
+      credentials: 'include',
+      ...init,
+    });
+  } catch (err) {
+    // iOS Safari rejects the credentialed cross-origin redirect Cloudflare
+    // Access uses when the session has expired (or been invalidated by
+    // Private Relay IP drift) — the fetch throws TypeError ("Load failed")
+    // before any Response lands, so the content-type check below never
+    // runs. Desktop browsers follow the redirect and serve OTP HTML which
+    // the check catches; iOS does not. Recover by forcing a top-level
+    // reload — Access redirects the document (no fetch CORS rules), OTP
+    // runs, SPA reloads with a fresh cookie. Cooldown stops a genuinely-
+    // down API from getting hammered with reloads.
+    if (attemptAuthReload()) {
+      return new Promise<T>(() => {});
+    }
+    throw err;
+  }
 
   // Cloudflare Access "session expired" path: the redirect to
   // truwit.cloudflareaccess.com/login lands on a 200 OK HTML page (the
@@ -37,9 +83,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     !contentType.toLowerCase().includes('json') &&
     typeof window !== 'undefined'
   ) {
-    window.location.reload();
-    // Give the navigation a tick to take effect before throwing.
-    return new Promise<T>(() => {});
+    if (attemptAuthReload()) {
+      return new Promise<T>(() => {});
+    }
+    // Cooldown denied — fall through; .json() will throw and the page
+    // will land on MaintenancePage. Better than infinite-reloading when
+    // upstream is genuinely returning HTML for some other reason.
   }
 
   if (!res.ok) {
