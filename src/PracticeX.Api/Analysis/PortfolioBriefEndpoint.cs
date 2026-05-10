@@ -38,13 +38,16 @@ public static class PortfolioBriefEndpoint
         """;
 
     private static async Task<Results<Ok<PortfolioBriefResponse>, NotFound>> GetPortfolioBrief(
+        Guid? facility,
         HttpContext httpContext,
         PracticeXDbContext db,
         ICurrentUserContext userContext,
         CancellationToken cancellationToken)
     {
+        var facilityKey = facility ?? PortfolioBrief.AllFacilities;
         var brief = await db.PortfolioBriefs
-            .FirstOrDefaultAsync(b => b.TenantId == userContext.TenantId, cancellationToken);
+            .FirstOrDefaultAsync(b => b.TenantId == userContext.TenantId
+                                   && b.FacilityId == facilityKey, cancellationToken);
         if (brief is null) return TypedResults.NotFound();
         // Defensive: iPad Safari was caching transient error responses for
         // this URL. Tell every layer not to.
@@ -61,6 +64,7 @@ public static class PortfolioBriefEndpoint
     }
 
     private static async Task<Results<Ok<PortfolioBriefResponse>, BadRequest<ProblemSummary>>> GeneratePortfolioBrief(
+        Guid? facility,
         PracticeXDbContext db,
         IDocumentLanguageModel llm,
         ICurrentUserContext userContext,
@@ -73,25 +77,61 @@ public static class PortfolioBriefEndpoint
                 "LLM provider isn't configured."));
         }
 
-        // Gather per-doc stage-2 cards. Skip docs without llm_extracted_fields_json.
-        var assets = await db.DocumentAssets
+        var facilityKey = facility ?? PortfolioBrief.AllFacilities;
+
+        // Resolve the facility name/code for the prompt, when scoped.
+        string facilityContext;
+        if (facilityKey == PortfolioBrief.AllFacilities)
+        {
+            facilityContext = "ALL FACILITIES IN THIS TENANT";
+        }
+        else
+        {
+            var f = await db.Facilities.FirstOrDefaultAsync(
+                x => x.Id == facilityKey && x.TenantId == userContext.TenantId,
+                cancellationToken);
+            if (f is null)
+            {
+                return TypedResults.BadRequest(new ProblemSummary("unknown_facility",
+                    "Facility not found in this tenant."));
+            }
+            facilityContext = $"{f.Name} ({f.Code})";
+        }
+
+        // Source docs: scope to the facility's candidates when filtering.
+        // (document_candidates carries facility_hint_id; document_assets do
+        // not, so we join through candidates to filter.)
+        IQueryable<DocumentAsset> assetQuery = db.DocumentAssets
             .Where(a => a.TenantId == userContext.TenantId &&
-                        a.LlmExtractedFieldsJson != null)
-            .ToListAsync(cancellationToken);
+                        a.LlmExtractedFieldsJson != null);
+        if (facilityKey != PortfolioBrief.AllFacilities)
+        {
+            var scopedAssetIds = db.DocumentCandidates
+                .Where(c => c.TenantId == userContext.TenantId
+                         && c.FacilityHintId == facilityKey)
+                .Select(c => c.DocumentAssetId);
+            assetQuery = assetQuery.Where(a => scopedAssetIds.Contains(a.Id));
+        }
+        var assets = await assetQuery.ToListAsync(cancellationToken);
 
         if (assets.Count == 0)
         {
             return TypedResults.BadRequest(new ProblemSummary("no_briefs",
-                "No per-document briefs available yet. Run /llm-extract-batch first."));
+                "No per-document briefs available for this scope yet. Run /llm-extract-batch first."));
         }
 
         var sourceNames = await db.SourceObjects
             .Where(s => s.TenantId == userContext.TenantId)
             .ToDictionaryAsync(s => s.Id, s => s.Name, cancellationToken);
 
-        var candidatesByAsset = await db.DocumentCandidates
+        // ToDictionary on candidate.DocumentAssetId can collide if a single
+        // asset has multiple candidate rows (rare — most often a re-ingest).
+        // Take the most recent candidate per asset to keep the rollup honest.
+        var candidatesByAsset = (await db.DocumentCandidates
             .Where(c => c.TenantId == userContext.TenantId)
-            .ToDictionaryAsync(c => c.DocumentAssetId, c => c.CandidateType, cancellationToken);
+            .ToListAsync(cancellationToken))
+            .GroupBy(c => c.DocumentAssetId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.CreatedAt).First().CandidateType);
 
         var cards = assets.Select(a =>
         {
@@ -133,7 +173,8 @@ public static class PortfolioBriefEndpoint
         var template = PromptLoader.LoadStage3();
         var prompt = PromptLoader.Render(template, new Dictionary<string, string>
         {
-            ["DOCUMENT_CARDS"] = cardsJson
+            ["DOCUMENT_CARDS"] = cardsJson,
+            ["FACILITY_CONTEXT"] = facilityContext
         });
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -156,15 +197,17 @@ public static class PortfolioBriefEndpoint
                     "Stage 3 returned an empty brief."));
             }
 
-            // Upsert.
+            // Upsert — keyed on (tenant, facility).
             var existing = await db.PortfolioBriefs
-                .FirstOrDefaultAsync(b => b.TenantId == userContext.TenantId, cancellationToken);
+                .FirstOrDefaultAsync(b => b.TenantId == userContext.TenantId
+                                       && b.FacilityId == facilityKey, cancellationToken);
             var now = DateTimeOffset.UtcNow;
             if (existing is null)
             {
                 existing = new PortfolioBrief
                 {
                     TenantId = userContext.TenantId,
+                    FacilityId = facilityKey,
                     CreatedAt = now
                 };
                 db.PortfolioBriefs.Add(existing);

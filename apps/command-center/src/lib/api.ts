@@ -678,13 +678,18 @@ export const analysisApi = {
     request<LlmExtractionResult>(`/analysis/documents/${assetId}/llm-extract`, { method: 'POST' }),
   llmExtractBatch: (force = false) =>
     request<BatchExtractionResult>(`/analysis/llm-extract-batch${force ? '?force=true' : ''}`, { method: 'POST' }),
-  getPortfolioBrief: () =>
+  getPortfolioBrief: (facilityId?: string) => {
     // Cache-buster: iPad Safari ITP / mobile WebKit was returning stuck
     // "Load failed" on this endpoint after earlier transient errors. Adding
     // a per-call timestamp guarantees a fresh URL on every fetch.
-    request<PortfolioBrief>(`/analysis/portfolio-brief?_t=${Date.now()}`),
-  generatePortfolioBrief: () =>
-    request<PortfolioBrief>('/analysis/portfolio-brief', { method: 'POST' }),
+    const params = new URLSearchParams({ _t: String(Date.now()) });
+    if (facilityId) params.set('facility', facilityId);
+    return request<PortfolioBrief>(`/analysis/portfolio-brief?${params}`);
+  },
+  generatePortfolioBrief: (facilityId?: string) => {
+    const qs = facilityId ? `?facility=${encodeURIComponent(facilityId)}` : '';
+    return request<PortfolioBrief>(`/analysis/portfolio-brief${qs}`, { method: 'POST' });
+  },
   getRenewals: () => request<RenewalsResponse>(`/analysis/renewals?_t=${Date.now()}`),
   getEntityGraph: () => request<EntityGraph>(`/analysis/entity-graph?_t=${Date.now()}`),
 };

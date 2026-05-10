@@ -1,5 +1,14 @@
 # Stage 3 — Practice Intelligence Brief (Portfolio Rollup)
 
+**Scope of this brief: {{FACILITY_CONTEXT}}**
+
+The brief opens *with the name of this scope* and synthesizes only the
+documents listed below — do NOT borrow names, deals, or dates from other
+facilities you might recall. If the scope is a single facility (for
+example, "Synexar Inc (SYNX)"), every section refers to that entity by
+name; do not refer to "the practice" generically when a specific name is
+supplied.
+
 You are a senior healthcare-practice strategic advisor preparing the
 **executive summary** that the managing partners will read first when they
 open the contract portfolio. They have already commissioned per-document

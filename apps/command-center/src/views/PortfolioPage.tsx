@@ -549,19 +549,22 @@ function PortfolioBriefSection() {
   const [genError, setGenError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [searchParams] = useSearchParams();
+  const facilityFilter = searchParams.get('facility');
 
   useEffect(() => {
     let cancelled = false;
     setState({ kind: 'loading' });
     (async () => {
       try {
-        const brief = await analysisApi.getPortfolioBrief();
+        const brief = await analysisApi.getPortfolioBrief(facilityFilter ?? undefined);
         if (!cancelled) setState({ kind: 'ready', brief });
       } catch (err) {
         if (cancelled) return;
         // 404 means the brief simply has not been generated for this
-        // tenant yet — render the "Generate brief" CTA. Anything else is
-        // a workspace-down condition; show the calm placeholder.
+        // (tenant, facility) yet — render the "Generate brief" CTA.
+        // Anything else is a workspace-down condition; show the calm
+        // placeholder.
         const status = (err as { status?: number } | undefined)?.status;
         if (status === 404) setState({ kind: 'absent' });
         else setState({ kind: 'error' });
@@ -570,13 +573,13 @@ function PortfolioBriefSection() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, facilityFilter]);
 
   async function generate() {
     setGenerating(true);
     setGenError(null);
     try {
-      const brief = await analysisApi.generatePortfolioBrief();
+      const brief = await analysisApi.generatePortfolioBrief(facilityFilter ?? undefined);
       setState({ kind: 'ready', brief });
     } catch {
       // Calm controlled message; we deliberately do not leak the

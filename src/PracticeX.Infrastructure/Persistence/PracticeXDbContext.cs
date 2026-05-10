@@ -243,7 +243,7 @@ public class PracticeXDbContext(DbContextOptions<PracticeXDbContext> options) : 
         modelBuilder.Entity<PortfolioBrief>(entity =>
         {
             entity.ToTable("portfolio_briefs", "doc");
-            entity.HasKey(x => x.TenantId);
+            entity.HasKey(x => new { x.TenantId, x.FacilityId });
             entity.Property(x => x.BriefMd).HasColumnType("text").IsRequired();
             entity.Property(x => x.Model).HasMaxLength(120);
         });
