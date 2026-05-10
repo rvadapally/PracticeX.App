@@ -6,6 +6,7 @@ using PracticeX.Discovery.Llm;
 using PracticeX.Domain.Audit;
 using PracticeX.Domain.Documents;
 using PracticeX.Infrastructure.Persistence;
+using PracticeX.Infrastructure.Tenancy;
 
 namespace PracticeX.Api.Analysis;
 
@@ -45,6 +46,21 @@ public static class PortfolioBriefEndpoint
         CancellationToken cancellationToken)
     {
         var facilityKey = facility ?? PortfolioBrief.AllFacilities;
+
+        // Slice 21 RBAC: facility users only read briefs for facilities
+        // they're authorized for. The "all facilities" sentinel is shown
+        // only to super/org admins (it would otherwise leak cross-facility
+        // synthesis to a single-facility user).
+        if (facilityKey == PortfolioBrief.AllFacilities)
+        {
+            if (!userContext.IsSuperAdmin && !userContext.IsOrgAdmin)
+                return TypedResults.NotFound();
+        }
+        else if (!userContext.IsAuthorizedForFacility(facilityKey))
+        {
+            return TypedResults.NotFound();
+        }
+
         var brief = await db.PortfolioBriefs
             .FirstOrDefaultAsync(b => b.TenantId == userContext.TenantId
                                    && b.FacilityId == facilityKey, cancellationToken);
@@ -78,6 +94,21 @@ public static class PortfolioBriefEndpoint
         }
 
         var facilityKey = facility ?? PortfolioBrief.AllFacilities;
+
+        // Slice 21 RBAC: same gating as the GET — block facility users
+        // from generating an "all-facilities" brief or one for a facility
+        // they don't own.
+        if (facilityKey == PortfolioBrief.AllFacilities)
+        {
+            if (!userContext.IsSuperAdmin && !userContext.IsOrgAdmin)
+                return TypedResults.BadRequest(new ProblemSummary("forbidden_scope",
+                    "All-facilities brief requires org_admin or super_admin."));
+        }
+        else if (!userContext.IsAuthorizedForFacility(facilityKey))
+        {
+            return TypedResults.BadRequest(new ProblemSummary("forbidden_facility",
+                "Caller is not authorized for the requested facility."));
+        }
 
         // Resolve the facility name/code for the prompt, when scoped.
         string facilityContext;

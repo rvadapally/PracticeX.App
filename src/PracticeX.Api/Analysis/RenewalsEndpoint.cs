@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using PracticeX.Application.Common;
 using PracticeX.Domain.Documents;
 using PracticeX.Infrastructure.Persistence;
+using PracticeX.Infrastructure.Tenancy;
 
 namespace PracticeX.Api.Analysis;
 
@@ -32,8 +33,14 @@ public static class RenewalsEndpoint
         var tenantId = userContext.TenantId;
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
+        // Slice 21 RBAC: renewals reflect facility scope.
+        var visibleAssetIds = db.DocumentCandidates
+            .Where(c => c.TenantId == tenantId)
+            .ApplyFacilityScope(userContext)
+            .Select(c => c.DocumentAssetId);
         var assets = await db.DocumentAssets
-            .Where(a => a.TenantId == tenantId && a.LlmExtractedFieldsJson != null)
+            .Where(a => a.TenantId == tenantId && a.LlmExtractedFieldsJson != null
+                     && visibleAssetIds.Contains(a.Id))
             .ToListAsync(cancellationToken);
 
         var sourceNames = await db.SourceObjects

@@ -136,7 +136,21 @@ public static class LlmExtractionEndpoint
             {
                 logger.LogWarning(ex, "Two-stage extraction failed on asset {AssetId}", asset.Id);
                 failed++;
-                await db.SaveChangesAsync(cancellationToken);
+                // Persist the failure status but never let a poisoned tracker
+                // (e.g. unparseable jsonb that Postgres rejected) kill the
+                // remaining batch — clear the tracker if the failure-save
+                // itself throws so the next iteration starts clean.
+                try
+                {
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+                catch (Exception saveEx)
+                {
+                    logger.LogWarning(saveEx,
+                        "Failed to persist failure status for asset {AssetId}; clearing change tracker",
+                        asset.Id);
+                    db.ChangeTracker.Clear();
+                }
             }
         }
 
@@ -337,9 +351,10 @@ public static class LlmExtractionEndpoint
         }, cancellationToken);
 
         var json = ExtractJson(stage2Resp.Text);
-        if (string.IsNullOrEmpty(json))
+        if (string.IsNullOrEmpty(json) || !IsParseableJson(json))
         {
             asset.LlmExtractionStatus = "failed";
+            asset.LlmExtractedFieldsJson = null;
             asset.UpdatedAt = DateTimeOffset.UtcNow;
             throw new InvalidOperationException("Stage 2 response did not contain a parseable JSON object.");
         }
@@ -373,6 +388,19 @@ public static class LlmExtractionEndpoint
             catch { /* swallow */ }
         }
         return asset.ExtractedFullText;
+    }
+
+    private static bool IsParseableJson(string json)
+    {
+        try
+        {
+            using var _ = JsonDocument.Parse(json);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

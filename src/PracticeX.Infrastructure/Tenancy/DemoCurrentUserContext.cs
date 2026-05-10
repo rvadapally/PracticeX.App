@@ -6,18 +6,16 @@ using PracticeX.Infrastructure.Persistence;
 namespace PracticeX.Infrastructure.Tenancy;
 
 /// <summary>
-/// Demo / pilot current-user resolver. Reads or seeds a default tenant + user so
-/// the source discovery flow works without authentication wired up. Production
-/// replaces this with a principal-backed implementation.
+/// Demo seeder for the default tenant + super-admin user. As of Slice 21
+/// this no longer doubles as the <see cref="ICurrentUserContext"/>
+/// implementation — that's now <c>RequestScopedCurrentUserContext</c>,
+/// which resolves the user from the Cloudflare Access principal. This
+/// class only exists to seed the row that the resolver looks up.
 /// </summary>
-public sealed class DemoCurrentUserContext : ICurrentUserContext
+public static class DemoCurrentUserContext
 {
     private static readonly Guid DemoTenantId = new("11111111-1111-1111-1111-111111111111");
     private static readonly Guid DemoUserId = new("22222222-2222-2222-2222-222222222222");
-
-    public Guid TenantId => DemoTenantId;
-    public Guid UserId => DemoUserId;
-    public string ActorType => "user";
 
     public static async Task EnsureSeededAsync(PracticeXDbContext dbContext, CancellationToken cancellationToken)
     {
@@ -51,6 +49,7 @@ public sealed class DemoCurrentUserContext : ICurrentUserContext
                 Email = "rvadapally@practicex.ai",
                 Name = "Raghuram Vadapally",
                 Status = "active",
+                IsSuperAdmin = true,  // Slice 21: seed as super-admin
                 CreatedAt = DateTimeOffset.UtcNow
             });
         }
@@ -58,6 +57,14 @@ public sealed class DemoCurrentUserContext : ICurrentUserContext
         {
             user.Name = "Raghuram Vadapally";
             user.Email = "rvadapally@practicex.ai";
+            user.IsSuperAdmin = true;
+            user.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        else if (!user.IsSuperAdmin)
+        {
+            // Backfill: the seeded demo user must always be super-admin so
+            // the no-header local dev path resolves to a usable principal.
+            user.IsSuperAdmin = true;
             user.UpdatedAt = DateTimeOffset.UtcNow;
         }
 

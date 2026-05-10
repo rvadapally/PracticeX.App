@@ -6,6 +6,7 @@ using PracticeX.Discovery.Llm;
 using PracticeX.Domain.Audit;
 using PracticeX.Domain.Documents;
 using PracticeX.Infrastructure.Persistence;
+using PracticeX.Infrastructure.Tenancy;
 
 namespace PracticeX.Api.Analysis;
 
@@ -52,7 +53,7 @@ public static class LegalAdvisorEndpoint
     // memo response). 8192-token output covers a 2,000-2,800 word memo.
     private const int MaxInputChars = 80_000;
     private const int StageAMaxTokens = 8192;
-    private const int StageBMaxTokens = 6144;
+    private const int StageBMaxTokens = 8192;  // bumped from 6144 — verbose memos with 8+ issues were truncating
     private const int CounselBriefMaxTokens = 8192;
     private const double StageATemperature = 0.2;
     private const double StageBTemperature = 0.1;
@@ -74,6 +75,15 @@ public static class LegalAdvisorEndpoint
         user message and emit a single JSON object that matches the schema.
         The memo is ground truth — do not infer beyond it. No prose, no
         markdown, no code fences — JSON only.
+
+        CRITICAL JSON HYGIENE: Every double-quote that appears INSIDE a
+        string value MUST be escaped as \". Newlines inside strings MUST be
+        escaped as \n. Backslashes as \\. Section symbols (§), em-dashes,
+        and other unicode are fine unescaped. The output MUST be parseable
+        by a strict JSON parser as-is — no trailing commas, no unquoted
+        keys, no JavaScript-style comments. If you quote a clause from the
+        memo that contains a parenthetical like Section 4 ("83b"), write
+        the inner quotes as Section 4 (\"83b\").
         """;
 
     private const string SystemPromptCounselBrief = """
@@ -110,6 +120,9 @@ public static class LegalAdvisorEndpoint
         var candidate = await db.DocumentCandidates
             .FirstOrDefaultAsync(c => c.DocumentAssetId == assetId && c.TenantId == userContext.TenantId, cancellationToken);
         var candidateType = candidate?.CandidateType ?? "unknown";
+
+        // Slice 21 RBAC: 404 (not 403) on out-of-scope memo generation.
+        if (!userContext.IsAuthorizedForFacility(candidate?.FacilityHintId)) return TypedResults.NotFound();
 
         var docText = ResolveDocumentText(asset);
         if (string.IsNullOrWhiteSpace(docText))
@@ -159,7 +172,40 @@ public static class LegalAdvisorEndpoint
         catch (Exception ex)
         {
             logger.LogError(ex, "Counsel's memo generation failed for asset {AssetId}", assetId);
-            await db.SaveChangesAsync(cancellationToken);
+            // Mark the asset failed (if in-memory state still allows it) so
+            // the UI can distinguish "tried and failed" from "never tried".
+            // Stage A leaves status='running' until completion; without this
+            // override, a Stage A throw would persist as 'running' forever.
+            asset.LegalMemoStatus = "failed";
+            asset.UpdatedAt = DateTimeOffset.UtcNow;
+            db.AuditEvents.Add(new AuditEvent
+            {
+                TenantId = userContext.TenantId,
+                ActorType = "user",
+                ActorId = userContext.UserId,
+                EventType = "legal_advisor.memo.failed",
+                ResourceType = "document_asset",
+                ResourceId = asset.Id,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    candidateType,
+                    family = PromptLoader.ResolveFamily(candidateType),
+                    error = ex.GetType().Name,
+                    message = ex.Message,
+                    inputChars = docText.Length
+                }),
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            // The originating exception may itself have come from SaveChanges
+            // (malformed JSON column, FK violation). Wrap, and clear the
+            // tracker if the failure-save also throws so we don't leave the
+            // request scope poisoned.
+            try { await db.SaveChangesAsync(cancellationToken); }
+            catch (Exception saveEx)
+            {
+                logger.LogWarning(saveEx, "Failed to persist memo failure status for asset {AssetId}", asset.Id);
+                db.ChangeTracker.Clear();
+            }
             return TypedResults.BadRequest(new ProblemSummary("memo_failed", ex.Message));
         }
     }
@@ -174,6 +220,13 @@ public static class LegalAdvisorEndpoint
             .FirstOrDefaultAsync(a => a.Id == assetId && a.TenantId == userContext.TenantId, cancellationToken);
         if (asset is null) return TypedResults.NotFound();
         if (string.IsNullOrEmpty(asset.LegalMemoMd)) return TypedResults.NotFound();
+
+        // Slice 21 RBAC: 404 (not 403) on out-of-scope memo reads.
+        var facilityHint = await db.DocumentCandidates
+            .Where(c => c.DocumentAssetId == assetId && c.TenantId == userContext.TenantId)
+            .Select(c => c.FacilityHintId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!userContext.IsAuthorizedForFacility(facilityHint)) return TypedResults.NotFound();
 
         return TypedResults.Ok(new LegalMemoResult(
             Status: asset.LegalMemoStatus ?? "completed",
@@ -204,9 +257,15 @@ public static class LegalAdvisorEndpoint
         // We require a Stage-1 brief to be present (the memo reads it as
         // grounding context) — the alternative is doing the brief first,
         // which we already do via /api/analysis/llm-extract-batch.
+        // Slice 21 RBAC: batch only processes assets the caller can see.
+        var visibleAssetIds = db.DocumentCandidates
+            .Where(c => c.TenantId == userContext.TenantId)
+            .ApplyFacilityScope(userContext)
+            .Select(c => c.DocumentAssetId);
         var assets = await db.DocumentAssets
             .Where(a => a.TenantId == userContext.TenantId &&
-                        a.LlmNarrativeMd != null)
+                        a.LlmNarrativeMd != null &&
+                        visibleAssetIds.Contains(a.Id))
             .ToListAsync(cancellationToken);
 
         var sourceNameById = await db.SourceObjects
@@ -255,7 +314,19 @@ public static class LegalAdvisorEndpoint
             {
                 logger.LogWarning(ex, "Counsel's memo failed for asset {AssetId}", asset.Id);
                 failed++;
-                await db.SaveChangesAsync(cancellationToken);
+                asset.LegalMemoStatus = "failed";
+                asset.UpdatedAt = DateTimeOffset.UtcNow;
+                try
+                {
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+                catch (Exception saveEx)
+                {
+                    logger.LogWarning(saveEx,
+                        "Failed to persist memo failure status for asset {AssetId}; clearing change tracker",
+                        asset.Id);
+                    db.ChangeTracker.Clear();
+                }
             }
         }
 
@@ -323,6 +394,13 @@ public static class LegalAdvisorEndpoint
                 "No Stage-A memo markdown to extract from. Run POST /memos/{id} first."));
         }
 
+        // Slice 21 RBAC: 404 (not 403) on out-of-scope retry attempts.
+        var facilityHint = await db.DocumentCandidates
+            .Where(c => c.DocumentAssetId == assetId && c.TenantId == userContext.TenantId)
+            .Select(c => c.FacilityHintId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!userContext.IsAuthorizedForFacility(facilityHint)) return TypedResults.NotFound();
+
         var stageBTpl = PromptLoader.LoadLegalMemoJson();
         var stageBPrompt = PromptLoader.Render(stageBTpl, new Dictionary<string, string>
         {
@@ -342,7 +420,7 @@ public static class LegalAdvisorEndpoint
             }, cancellationToken);
 
             var json = ExtractJson(stageBResp.Text);
-            if (string.IsNullOrEmpty(json))
+            if (string.IsNullOrEmpty(json) || !IsParseableJson(json))
             {
                 asset.LegalMemoStatus = "partial";
                 await db.SaveChangesAsync(cancellationToken);
@@ -385,8 +463,13 @@ public static class LegalAdvisorEndpoint
         ICurrentUserContext userContext,
         CancellationToken cancellationToken)
     {
+        // Slice 21 RBAC: portfolio rows reflect facility scope.
+        var visibleAssetIds = db.DocumentCandidates
+            .Where(c => c.TenantId == userContext.TenantId)
+            .ApplyFacilityScope(userContext)
+            .Select(c => c.DocumentAssetId);
         var assets = await db.DocumentAssets
-            .Where(a => a.TenantId == userContext.TenantId)
+            .Where(a => a.TenantId == userContext.TenantId && visibleAssetIds.Contains(a.Id))
             .ToListAsync(cancellationToken);
 
         var sourceNames = await db.SourceObjects
@@ -455,9 +538,16 @@ public static class LegalAdvisorEndpoint
                 "LLM provider isn't configured."));
         }
 
+        // Slice 21 RBAC: cross-doc synthesis must respect facility scope.
+        // A Parag-scoped Counsel's Brief MUST NOT mingle Synexar memos.
+        var visibleAssetIds = db.DocumentCandidates
+            .Where(c => c.TenantId == userContext.TenantId)
+            .ApplyFacilityScope(userContext)
+            .Select(c => c.DocumentAssetId);
         var assets = await db.DocumentAssets
             .Where(a => a.TenantId == userContext.TenantId &&
-                        a.LegalMemoJson != null)
+                        a.LegalMemoJson != null &&
+                        visibleAssetIds.Contains(a.Id))
             .ToListAsync(cancellationToken);
 
         if (assets.Count == 0)
@@ -595,6 +685,16 @@ public static class LegalAdvisorEndpoint
         ICurrentUserContext userContext,
         CancellationToken cancellationToken)
     {
+        // Slice 21 RBAC: counsel_briefs is keyed per-tenant only — until
+        // tenant split (Phase 2) lands, a facility-scoped user reading the
+        // cached brief could see another facility's synthesis. Force them
+        // to regenerate by hiding the cached row. Super/org admins still
+        // see the cached brief.
+        if (!userContext.IsSuperAdmin && !userContext.IsOrgAdmin)
+        {
+            return TypedResults.NotFound();
+        }
+
         var brief = await db.CounselBriefs
             .FirstOrDefaultAsync(b => b.TenantId == userContext.TenantId, cancellationToken);
         if (brief is null) return TypedResults.NotFound();
@@ -722,9 +822,16 @@ public static class LegalAdvisorEndpoint
         }
 
         var json = ExtractJson(stageBResp.Text);
-        if (string.IsNullOrEmpty(json))
+        if (string.IsNullOrEmpty(json) || !IsParseableJson(json))
         {
-            asset.LegalMemoStatus = "partial";  // memo md saved, JSON failed — UI can still render the markdown
+            // The model occasionally emits malformed JSON — most often
+            // unescaped quotes inside a string value (e.g. `"where": "Letter
+            // §4 ("83b") provision..."`). Postgres rejects those at insert
+            // time with 22P02 and the whole transaction fails. Treat as
+            // partial: keep the markdown memo (the load-bearing artifact),
+            // skip the JSON column. UI still renders; portfolio sort still
+            // works via the markdown-regex risk-score backstop.
+            asset.LegalMemoStatus = "partial";
             asset.UpdatedAt = DateTimeOffset.UtcNow;
             return (stageAResp.TokensIn + stageBResp.TokensIn,
                     stageAResp.TokensOut + stageBResp.TokensOut);
@@ -794,6 +901,12 @@ public static class LegalAdvisorEndpoint
             catch { /* swallow */ }
         }
         return asset.ExtractedFullText;
+    }
+
+    private static bool IsParseableJson(string json)
+    {
+        try { using var _ = JsonDocument.Parse(json); return true; }
+        catch { return false; }
     }
 
     private static string? ExtractJson(string text)

@@ -456,6 +456,12 @@ export interface CurrentUser {
   initials: string;
   tenantId: string;
   tenantName: string;
+  // Slice 21 RBAC: surfaced so the frontend can gate UI on role/scope.
+  // Backend is the source of truth — every read endpoint filters by the
+  // same scope. Frontend uses these only for visible affordances.
+  role: 'super_admin' | 'org_admin' | 'facility_user';
+  isSuperAdmin: boolean;
+  accessibleFacilityIds: string[] | null;  // null = unrestricted in tenant
 }
 
 export interface Facility {

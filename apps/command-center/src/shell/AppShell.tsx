@@ -234,6 +234,49 @@ export function AppShell() {
         <div className="plan-card">
           <div className="section-label" style={{ marginLeft: 0 }}>Tenant</div>
           <strong>{tenantName}</strong>
+          {/* Slice 21 RBAC: surface role + scope so the user knows what
+              they're looking at. Backend is what enforces — this is just
+              a visible affordance, not a guard. */}
+          {user ? (
+            <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.55 }}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  background:
+                    user.role === 'super_admin' ? 'rgba(212,99,30,0.15)'
+                    : user.role === 'org_admin' ? 'rgba(29,111,66,0.15)'
+                    : 'rgba(0,0,0,0.06)',
+                  color:
+                    user.role === 'super_admin' ? 'var(--px-orange, #d4631e)'
+                    : user.role === 'org_admin' ? 'var(--px-green, #1d6f42)'
+                    : 'var(--px-ink, #555)',
+                  fontWeight: 600,
+                  letterSpacing: 0.4,
+                  textTransform: 'uppercase',
+                  fontSize: 10,
+                }}
+                title={
+                  user.role === 'super_admin'
+                    ? 'Super Admin · access to all organizations + facilities'
+                    : user.role === 'org_admin'
+                    ? 'Org Admin · all facilities in this organization'
+                    : `Facility scope · ${(user.accessibleFacilityIds ?? []).length} facility/facilities`
+                }
+              >
+                {user.role === 'super_admin' ? 'Super Admin'
+                  : user.role === 'org_admin' ? 'Org Admin'
+                  : 'Facility'}
+              </span>
+              {!user.isSuperAdmin && user.role === 'facility_user' && user.accessibleFacilityIds ? (
+                <span className="muted" style={{ marginLeft: 8 }}>
+                  scope: {user.accessibleFacilityIds.length} facility
+                  {user.accessibleFacilityIds.length === 1 ? '' : 'ies'}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {stats ? (
             <div className="muted" style={{ marginTop: 4 }}>
               {stats.documents} docs · {stats.totalSizeMb.toFixed(1)} MB processed

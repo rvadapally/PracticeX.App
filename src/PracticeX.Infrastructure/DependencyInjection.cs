@@ -44,7 +44,14 @@ public static class DependencyInjection
                 .UseSnakeCaseNamingConvention());
 
         services.AddSingleton<IClock, SystemClock>();
-        services.AddScoped<ICurrentUserContext, DemoCurrentUserContext>();
+
+        // Slice 21 RBAC Phase 1: resolve the current user from the
+        // Cloudflare Access principal (or X-Impersonate-Email for testing
+        // by super-admins). DemoCurrentUserContext remains in the assembly
+        // only for its EnsureSeededAsync helper, which seeds the default
+        // super-admin row.
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUserContext, RequestScopedCurrentUserContext>();
 
         services.Configure<DocumentStorageOptions>(configuration.GetSection(DocumentStorageOptions.SectionName));
         services.Configure<MicrosoftGraphOptions>(configuration.GetSection(MicrosoftGraphOptions.SectionName));
