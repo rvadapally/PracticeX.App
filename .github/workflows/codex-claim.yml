@@ -1,0 +1,162 @@
+name: Codex - Claim Issue
+
+on:
+  issues:
+    types: [opened, labeled, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: GitHub issue number to claim
+        required: true
+        type: number
+
+concurrency:
+  group: codex-agent-practicex-app
+  cancel-in-progress: false
+
+jobs:
+  claim_and_implement:
+    name: Claim and implement
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (
+        contains(github.event.issue.labels.*.name, 'codex-ready')
+        && !contains(github.event.issue.labels.*.name, 'codex-working')
+        && !contains(github.event.issue.labels.*.name, 'codex-review')
+      )
+
+    runs-on: [self-hosted, macOS, synexar-dev-mac]
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          issue_number="${INPUT_ISSUE_NUMBER:-${EVENT_ISSUE_NUMBER:-}}"
+          if [ -z "$issue_number" ]; then
+            echo "No issue number found." >&2
+            exit 1
+          fi
+
+          issue_json="$(gh issue view "$issue_number" --json number,title,body,labels,url)"
+          labels="$(printf '%s' "$issue_json" | jq -r '[.labels[].name] | join(",")')"
+          if ! printf '%s\n' "$labels" | tr ',' '\n' | grep -qx 'codex-ready'; then
+            echo "Issue #$issue_number does not have codex-ready; refusing to run." >&2
+            exit 1
+          fi
+
+          {
+            echo "number=$issue_number"
+            echo "url=$(printf '%s' "$issue_json" | jq -r '.url')"
+            echo "title<<EOF"
+            printf '%s\n' "$issue_json" | jq -r '.title'
+            echo "EOF"
+            echo "body<<EOF"
+            printf '%s\n' "$issue_json" | jq -r '.body // ""'
+            echo "EOF"
+            echo "labels=$labels"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mark claimed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --add-label codex-working --remove-label codex-blocked
+          gh issue comment "$ISSUE_NUMBER" --body "Codex claimed this issue and is starting now."
+
+      - name: Preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/codex-preflight.sh
+
+      - name: Run Codex
+        id: codex
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+          ISSUE_URL: ${{ steps.issue.outputs.url }}
+          ISSUE_TITLE: ${{ steps.issue.outputs.title }}
+          ISSUE_BODY: ${{ steps.issue.outputs.body }}
+          ISSUE_LABELS: ${{ steps.issue.outputs.labels }}
+        run: |
+          set -euo pipefail
+          mkdir -p .codex/agent-runs
+          output_file=".codex/agent-runs/issue-${ISSUE_NUMBER}-final.md"
+
+          codex exec \
+            --cd "$PWD" \
+            --dangerously-bypass-approvals-and-sandbox \
+            --output-last-message "$output_file" \
+            - <<PROMPT
+          You are Codex running on the PracticeX self-hosted Mac runner.
+
+          Intake contract:
+          - Work only because this issue has the `codex-ready` label.
+          - Do not claim or inspect unrelated issues.
+          - Do not work on issues without `codex-ready`; those belong to Claude or humans.
+          - Preserve unrelated local/user changes. Do not revert files you did not need to touch.
+
+          Required repository context:
+          - Read AGENTS.md.
+          - Read README.md.
+          - For product or architecture questions, inspect docs/revised_prd.md and docs/architecture-decisions.md when relevant.
+
+          GitHub issue:
+          - Number: ${ISSUE_NUMBER}
+          - URL: ${ISSUE_URL}
+          - Title: ${ISSUE_TITLE}
+          - Labels: ${ISSUE_LABELS}
+          - Body:
+          ${ISSUE_BODY}
+
+          Execution requirements:
+          1. Create or switch to a branch named `codex/issue-${ISSUE_NUMBER}` with a short slug if useful.
+          2. Implement the issue end to end using the repo's architecture and AGENTS.md rules.
+          3. Run focused verification appropriate to the touched files. At minimum:
+             - Backend changes: `dotnet build PracticeX.sln` and relevant `dotnet test` project.
+             - Frontend changes: `npm install` if needed, then `npm run typecheck` and `npm run build`.
+             - Database changes: verify SQL identifiers are snake_case and migration scripts are idempotent.
+          4. Commit your changes.
+          5. Push the branch to origin.
+          6. Open a draft pull request linked to the issue.
+          7. Comment on the issue with the PR link, what was tested, and any remaining risk.
+          8. Replace `codex-working` with `codex-review` when the PR is open.
+
+          If blocked:
+          - Comment on the issue with the blocker and the exact missing information.
+          - Add `codex-blocked`.
+          - Remove `codex-working`.
+          - Do not open a low-quality PR just to finish.
+          PROMPT
+
+          echo "output_file=$output_file" >> "$GITHUB_OUTPUT"
+
+      - name: Mark failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ISSUE_NUMBER:-}" ]; then
+            gh issue edit "$ISSUE_NUMBER" --add-label codex-blocked --remove-label codex-working || true
+            gh issue comment "$ISSUE_NUMBER" --body "Codex run failed before completing. Check this workflow run for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+          fi
