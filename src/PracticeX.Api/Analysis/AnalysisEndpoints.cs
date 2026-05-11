@@ -187,7 +187,7 @@ public static class AnalysisEndpoints
             .Select(t => new { t.Id, t.Name })
             .FirstOrDefaultAsync(cancellationToken);
 
-        var name = user?.Name ?? "Unknown";
+        var name = user?.Name ?? DeriveDisplayNameFromEmail(userContext.Email) ?? "Unknown";
         var initials = string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Take(2)
             .Select(w => w.Length > 0 ? w[0] : ' '))
@@ -206,7 +206,7 @@ public static class AnalysisEndpoints
         return TypedResults.Ok(new CurrentUserResponse(
             UserId: user?.Id ?? userContext.UserId,
             Name: name,
-            Email: user?.Email ?? "",
+            Email: user?.Email ?? userContext.Email ?? "",
             Initials: string.IsNullOrWhiteSpace(initials) ? "??" : initials,
             TenantId: tenant?.Id ?? userContext.TenantId,
             TenantName: tenant?.Name ?? "Unknown",
@@ -214,6 +214,24 @@ public static class AnalysisEndpoints
             IsSuperAdmin: userContext.IsSuperAdmin,
             AccessibleFacilityIds: facilityIds
         ));
+    }
+
+    private static string? DeriveDisplayNameFromEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        var localPart = email.Split('@', 2)[0].Trim();
+        if (string.IsNullOrWhiteSpace(localPart)) return null;
+        var words = localPart
+            .Replace('_', ' ')
+            .Replace('.', ' ')
+            .Replace('-', ' ')
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return null;
+        return string.Join(" ", words.Select(static word =>
+        {
+            if (word.Length == 1) return word.ToUpperInvariant();
+            return char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant();
+        }));
     }
 
     /// <summary>
