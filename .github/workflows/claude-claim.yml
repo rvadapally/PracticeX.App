@@ -95,11 +95,25 @@ jobs:
               1. Apply `/synexar-task` using title + body. Read `AGENTS.md` /
                  `CLAUDE.md` first to understand the repo conventions.
               2. Run repo-appropriate build + tests before opening a PR.
-              3. Open a pull request linking this issue. PR body must include:
+              3. **Capture visual proof of the feature** — required for
+                 `claude-shipped`:
+                   - For UI changes: take a short screen recording (preferred)
+                     or screenshots. Commit to `docs/shipped/<issue>/` and
+                     embed in the PR body and tracker comment.
+                   - For API / backend changes: include a curl transcript or
+                     test output showing the behavior under "Verification"
+                     in the PR.
+                   - For mobile/native changes: boot a sim, build, install,
+                     launch, record:
+                     `xcrun simctl io booted recordVideo docs/shipped/<n>/demo.mp4 &`
+                     interact 5–15s, then `kill -SIGINT %1`.
+                 If the change is purely internal, note "non-visual change" in
+                 the PR body.
+              4. Open a pull request linking this issue. PR body must include:
                    - tier classification chosen by /synexar-task,
                    - what changed and why,
-                   - test output / verification notes.
-              4. The workflow's final step will edit the tracker comment with
+                   - embedded demo media OR "non-visual change" note.
+              5. The workflow's final step will edit the tracker comment with
                  the PR link and swap the label.
 
             If anything fails, edit the tracker comment under `### Notes` with
