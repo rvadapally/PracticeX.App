@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <!--
+      Dev and CI hosts can have a newer shared runtime installed than the target
+      framework. Allow major-version roll-forward so net9 executables and test
+      hosts still run on machines that currently only have .NET 10 present.
+    -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+</Project>
