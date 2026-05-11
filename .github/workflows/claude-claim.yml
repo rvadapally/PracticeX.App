@@ -1,0 +1,181 @@
+name: Claude — Claim Issue
+
+# Event-driven entry point for the Claude agent on the PracticeX repo. Fires
+# on every newly-opened (or reopened) issue, except those labeled `codex-ready`
+# which belong to the parallel OpenAI Codex pipeline.
+#
+# Runs on the existing `practicex-mac-1` self-hosted runner — same Mac, same
+# labels as the parallel codex-claim workflow. Concurrency-grouped so back-to-
+# back Claude+Codex runs don't fight over the working tree.
+
+on:
+  issues:
+    types: [opened, reopened]
+
+concurrency:
+  group: claude-agent-practicex-app
+  cancel-in-progress: false
+
+jobs:
+  claim_and_implement:
+    name: Claim and implement
+    if: >-
+      !contains(github.event.issue.labels.*.name, 'codex-ready')
+
+    runs-on: [self-hosted, macOS, synexar-dev-mac]
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    outputs:
+      tracker_id: ${{ steps.claim.outputs.tracker_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claim — label + anchor comment
+        id: claim
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const o = context.repo.owner, r = context.repo.repo
+            const n = context.issue.number
+            const runUrl = `${context.serverUrl}/${o}/${r}/actions/runs/${context.runId}`
+
+            await github.rest.issues.addLabels({
+              owner: o, repo: r, issue_number: n,
+              labels: ['claude-working']
+            }).catch(e => core.warning(`addLabels: ${e.message}`))
+
+            const body = [
+              '## 🤖 Claude is on this',
+              '',
+              '- [x] Claim issue',
+              '- [ ] Implement (`/synexar-task`)',
+              '- [ ] Build + tests',
+              '- [ ] Open pull request',
+              '',
+              `_Live run: [#${context.runId}](${runUrl})_`,
+            ].join('\n')
+
+            const { data: c } = await github.rest.issues.createComment({
+              owner: o, repo: r, issue_number: n, body
+            })
+            core.setOutput('tracker_id', c.id)
+
+      - name: Run Claude Code agent
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --model claude-opus-4-7
+            --allowedTools Bash,Read,Edit,Write,Grep,Glob,Skill,WebFetch
+          prompt: |
+            You are claiming GitHub issue #${{ github.event.issue.number }} in
+            repo ${{ github.repository }}. A tracker comment (id
+            ${{ steps.claim.outputs.tracker_id }}) is already posted — DO NOT
+            create new top-level comments. Append progress detail by editing
+            that comment via
+            `gh api -X PATCH repos/${{ github.repository }}/issues/comments/${{ steps.claim.outputs.tracker_id }}`
+            preserving the checklist and adding under a `### Notes` section.
+
+            Issue title: ${{ github.event.issue.title }}
+
+            Issue body:
+            ${{ github.event.issue.body }}
+
+            Steps:
+              1. Apply `/synexar-task` using title + body. Read `AGENTS.md` /
+                 `CLAUDE.md` first to understand the repo conventions.
+              2. Run repo-appropriate build + tests before opening a PR.
+              3. Open a pull request linking this issue. PR body must include:
+                   - tier classification chosen by /synexar-task,
+                   - what changed and why,
+                   - test output / verification notes.
+              4. The workflow's final step will edit the tracker comment with
+                 the PR link and swap the label.
+
+            If anything fails, edit the tracker comment under `### Notes` with
+            the error and exit non-zero so the workflow marks the issue
+            `claude-blocked`.
+
+      - name: Find PR (if opened)
+        id: pr
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', sort: 'created', direction: 'desc', per_page: 20
+            })
+            const refs = [
+              `#${context.issue.number}`,
+              `closes #${context.issue.number}`,
+              `fixes #${context.issue.number}`,
+              `resolves #${context.issue.number}`,
+            ]
+            const match = prs.find(p =>
+              refs.some(ref => (p.body || '').toLowerCase().includes(ref.toLowerCase()))
+            )
+            if (match) {
+              core.setOutput('number', match.number)
+              core.setOutput('url', match.html_url)
+              core.setOutput('title', match.title)
+            }
+
+      - name: Finalize — swap labels + edit tracker comment
+        if: always() && steps.claim.outputs.tracker_id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const o = context.repo.owner, r = context.repo.repo
+            const n = context.issue.number
+            const success = '${{ job.status }}' === 'success'
+            const prNumber = '${{ steps.pr.outputs.number }}'
+            const prUrl = '${{ steps.pr.outputs.url }}'
+            const prTitle = '${{ steps.pr.outputs.title }}'
+            const runUrl = `${context.serverUrl}/${o}/${r}/actions/runs/${context.runId}`
+
+            await github.rest.issues.removeLabel({
+              owner: o, repo: r, issue_number: n, name: 'claude-working'
+            }).catch(() => {})
+
+            await github.rest.issues.addLabels({
+              owner: o, repo: r, issue_number: n,
+              labels: [success ? 'claude-shipped' : 'claude-blocked']
+            }).catch(() => {})
+
+            const final = success ? [
+              '## ✅ Claude shipped this',
+              '',
+              '- [x] Claim issue',
+              '- [x] Implement (`/synexar-task`)',
+              '- [x] Build + tests',
+              '- [x] Open pull request',
+              '',
+              prNumber
+                ? `**Pull request:** [#${prNumber} — ${prTitle}](${prUrl})`
+                : '_No PR link captured — check the run logs._',
+              '',
+              `_Run: [#${context.runId}](${runUrl})_`,
+            ].join('\n') : [
+              '## ⚠️ Claude got blocked',
+              '',
+              'See the run log for details. Close + reopen this issue to retry.',
+              '',
+              `_Run: [#${context.runId}](${runUrl})_`,
+            ].join('\n')
+
+            await github.rest.issues.updateComment({
+              owner: o, repo: r,
+              comment_id: ${{ steps.claim.outputs.tracker_id }},
+              body: final
+            })
