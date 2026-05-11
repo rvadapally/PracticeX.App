@@ -89,6 +89,35 @@ select {
   margin-left: auto;
 }
 
+.user-chip {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.user-chip-name,
+.user-chip-email {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-chip-name {
+  color: var(--px-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.user-chip-email {
+  color: var(--px-ink-3);
+  font-family: var(--px-mono);
+  font-size: 10px;
+}
+
 .sidebar {
   background: color-mix(in srgb, var(--px-surface) 78%, var(--px-bg));
   border-right: 1px solid var(--px-line);
@@ -1480,5 +1509,4 @@ a.doc-row:hover { background: var(--px-bg-1, #fafafa); }
     grid-template-columns: 1fr;
   }
 }
-
 

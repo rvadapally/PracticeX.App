@@ -41,6 +41,12 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
 
     private static readonly Guid DemoTenantId = new("11111111-1111-1111-1111-111111111111");
     private static readonly Guid DemoUserId = new("22222222-2222-2222-2222-222222222222");
+    private static readonly HashSet<string> DemoSuperAdminEmails = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "rvadapally@practicex.ai",
+        "rvadapally@synexar.ai",
+        "rvadapally@gmail.com",
+    };
 
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly PracticeXDbContext _db;
@@ -57,6 +63,7 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
 
     public Guid TenantId => _resolved.Value.TenantId;
     public Guid UserId => _resolved.Value.UserId;
+    public string? Email => _resolved.Value.Email;
     public string ActorType => "user";
     public bool IsSuperAdmin => _resolved.Value.IsSuperAdmin;
     public bool IsOrgAdmin => _resolved.Value.IsOrgAdmin;
@@ -78,12 +85,18 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
         AppUser? user = null;
         if (!string.IsNullOrWhiteSpace(email))
         {
-            // Email is unique per (tenant_id, email) — lookup is by email
-            // alone today because we only have one tenant; once tenant
-            // split lands the lookup will need tenant disambiguation.
+            user = FindActiveUserByEmail(email);
+        }
+
+        // Cloudflare Access can present Raghu through multiple allowed
+        // inboxes. Treat those aliases as the same operator so the UI can
+        // keep rendering a stable identity even if the backing row hasn't
+        // been migrated yet.
+        if (user is null && !string.IsNullOrWhiteSpace(email) && DemoSuperAdminEmails.Contains(email))
+        {
             user = _db.Users
                 .AsNoTracking()
-                .FirstOrDefault(u => u.Email == email && u.Status == "active");
+                .FirstOrDefault(u => u.Id == DemoUserId && u.Status == "active");
         }
 
         // Demo fallback: pre-auth local dev. Resolve to the seeded super-admin.
@@ -94,7 +107,7 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
             // Last resort — pre-seed scenario. Behave as a stub super-admin
             // pointing at the demo tenant so endpoints don't NPE; production
             // traffic should never hit this branch.
-            return new ResolvedUser(DemoTenantId, DemoUserId, IsSuperAdmin: true, IsOrgAdmin: false, null);
+            return new ResolvedUser(DemoTenantId, DemoUserId, email, IsSuperAdmin: true, IsOrgAdmin: false, null);
         }
 
         if (user.IsSuperAdmin)
@@ -107,7 +120,7 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
             // tenant split is the platform tenant — empty of docs by
             // design, prompts the UI to surface a tenant-picker).
             var effectiveTenant = ResolveTenantOverride(user.TenantId);
-            return new ResolvedUser(effectiveTenant, user.Id, IsSuperAdmin: true, IsOrgAdmin: false, null);
+            return new ResolvedUser(effectiveTenant, user.Id, user.Email, IsSuperAdmin: true, IsOrgAdmin: false, null);
         }
 
         // Compute access set from role assignments. Org admin = any active
@@ -124,7 +137,7 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
         var isOrgAdmin = assignments.Any(a => a.RoleName == StandardRoleNames.OrgAdmin);
         if (isOrgAdmin)
         {
-            return new ResolvedUser(user.TenantId, user.Id, IsSuperAdmin: false, IsOrgAdmin: true, null);
+            return new ResolvedUser(user.TenantId, user.Id, user.Email, IsSuperAdmin: false, IsOrgAdmin: true, null);
         }
 
         var facilityIds = assignments
@@ -134,7 +147,20 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
 
         // No assignments = no access. Return an empty set, not null — null
         // means "unrestricted" for org/super admins.
-        return new ResolvedUser(user.TenantId, user.Id, IsSuperAdmin: false, IsOrgAdmin: false, facilityIds);
+        return new ResolvedUser(user.TenantId, user.Id, user.Email, IsSuperAdmin: false, IsOrgAdmin: false, facilityIds);
+    }
+
+    private AppUser? FindActiveUserByEmail(string email)
+    {
+        var normalized = NormalizeEmail(email);
+        if (normalized is null) return null;
+
+        // Access headers occasionally vary in case; treat email identity as
+        // case-insensitive at the app boundary even though the persisted
+        // column is plain text today.
+        return _db.Users
+            .AsNoTracking()
+            .FirstOrDefault(u => u.Status == "active" && u.Email.ToLower() == normalized);
     }
 
     /// <summary>
@@ -186,7 +212,7 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
             // Access only when the Access user is also a super-admin.
             var accessUser = _db.Users
                 .AsNoTracking()
-                .FirstOrDefault(u => u.Email == cfEmail);
+                .FirstOrDefault(u => u.Status == "active" && u.Email.ToLower() == NormalizeEmail(cfEmail));
             if (accessUser?.IsSuperAdmin == true)
             {
                 return impEmail;
@@ -205,9 +231,13 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
         return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
     }
 
+    private static string? NormalizeEmail(string? email)
+        => string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToLowerInvariant();
+
     private sealed record ResolvedUser(
         Guid TenantId,
         Guid UserId,
+        string? Email,
         bool IsSuperAdmin,
         bool IsOrgAdmin,
         IReadOnlySet<Guid>? AccessibleFacilityIds);

@@ -15,6 +15,7 @@ public interface ICurrentUserContext
 {
     Guid TenantId { get; }
     Guid UserId { get; }
+    string? Email { get; }
     string ActorType { get; }
 
     /// <summary>

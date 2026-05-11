@@ -123,6 +123,8 @@ export function AppShell() {
 
   const userName = user?.name ?? '—';
   const userInitials = user?.initials ?? '?';
+  const userEmail = user?.email ?? '';
+  const userLabel = user?.name?.trim() || (userEmail ? userEmail.split('@')[0] : 'Workspace user');
   // Once the initial load resolves we know whether the API answered. If it
   // didn't, drop the perpetual "Loading…" placeholder for a calm,
   // controlled label so the sidebar doesn't read as broken during a
@@ -203,6 +205,10 @@ export function AppShell() {
         <button className="px-icon-button" type="button" aria-label="Settings">
           <Settings size={15} />
         </button>
+        <div className="user-chip" title={userEmail || userName}>
+          <span className="user-chip-name">{userLabel}</span>
+          <span className="user-chip-email">{userEmail || 'Access session'}</span>
+        </div>
         <div className="px-avatar" title={userName}>{userInitials}</div>
         <button
           className="px-icon-button"
