@@ -100,12 +100,9 @@ jobs:
           set -euo pipefail
           mkdir -p .codex/agent-runs
           output_file=".codex/agent-runs/issue-${ISSUE_NUMBER}-final.md"
+          prompt_file=".codex/agent-runs/issue-${ISSUE_NUMBER}-prompt.md"
 
-          codex exec \
-            --cd "$PWD" \
-            --dangerously-bypass-approvals-and-sandbox \
-            --output-last-message "$output_file" \
-            - <<PROMPT
+          cat > "$prompt_file" <<'PROMPT'
           You are Codex running on the PracticeX self-hosted Mac runner.
 
           Intake contract:
@@ -119,16 +116,10 @@ jobs:
           - Read README.md.
           - For product or architecture questions, inspect docs/revised_prd.md and docs/architecture-decisions.md when relevant.
 
-          GitHub issue:
-          - Number: ${ISSUE_NUMBER}
-          - URL: ${ISSUE_URL}
-          - Title: ${ISSUE_TITLE}
-          - Labels: ${ISSUE_LABELS}
-          - Body:
-          ${ISSUE_BODY}
+          GitHub issue details are appended below as JSON.
 
           Execution requirements:
-          1. Create or switch to a branch named `codex/issue-${ISSUE_NUMBER}` with a short slug if useful.
+          1. Create or switch to a branch named `codex/issue-<issue number>` with a short slug if useful.
           2. Implement the issue end to end using the repo's architecture and AGENTS.md rules.
           3. Run focused verification appropriate to the touched files. At minimum:
              - Backend changes: `dotnet build PracticeX.sln` and relevant `dotnet test` project.
@@ -146,6 +137,25 @@ jobs:
           - Remove `codex-working`.
           - Do not open a low-quality PR just to finish.
           PROMPT
+
+          {
+            echo ""
+            echo "Issue JSON:"
+            jq -n \
+              --arg number "$ISSUE_NUMBER" \
+              --arg url "$ISSUE_URL" \
+              --arg title "$ISSUE_TITLE" \
+              --arg labels "$ISSUE_LABELS" \
+              --arg body "$ISSUE_BODY" \
+              '{number:$number,url:$url,title:$title,labels:($labels | split(",")),body:$body}'
+          } >> "$prompt_file"
+
+          codex exec \
+            --cd "$PWD" \
+            --model gpt-5.4 \
+            --dangerously-bypass-approvals-and-sandbox \
+            --output-last-message "$output_file" \
+            - < "$prompt_file"
 
           echo "output_file=$output_file" >> "$GITHUB_OUTPUT"
 
