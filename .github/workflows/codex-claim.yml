@@ -2,7 +2,7 @@ name: Codex - Claim Issue
 
 on:
   issues:
-    types: [opened, labeled, reopened]
+    types: [labeled, reopened]
   workflow_dispatch:
     inputs:
       issue_number:
