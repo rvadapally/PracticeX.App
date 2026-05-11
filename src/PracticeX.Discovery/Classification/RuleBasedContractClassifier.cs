@@ -146,7 +146,7 @@ public sealed class RuleBasedContractClassifier : IDocumentClassifier
             if (type == DocumentCandidateTypes.Unknown)
             {
                 type = DocumentCandidateTypes.Amendment;
-                confidence = Math.Max(confidence, 0.55m);
+                confidence = Math.Max(confidence, 0.6m);
             }
         }
 
@@ -157,7 +157,7 @@ public sealed class RuleBasedContractClassifier : IDocumentClassifier
             if (type == DocumentCandidateTypes.Unknown)
             {
                 type = DocumentCandidateTypes.FeeSchedule;
-                confidence = Math.Max(confidence, 0.55m);
+                confidence = Math.Max(confidence, 0.6m);
             }
         }
 
