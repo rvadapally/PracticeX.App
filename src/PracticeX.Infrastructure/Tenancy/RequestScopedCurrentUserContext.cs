@@ -15,7 +15,8 @@ namespace PracticeX.Infrastructure.Tenancy;
 ///   <item>Super admin → unrestricted (AccessibleFacilityIds = null).</item>
 ///   <item>Org admin → all facilities in their tenant (AccessibleFacilityIds = null,
 ///         IsOrgAdmin = true; the tenant filter still applies).</item>
-///   <item>Facility user → set of facility ids from their active role_assignments.</item>
+///   <item>Facility admin / facility user → set of facility ids from their
+///         active role_assignments.</item>
 /// </list>
 ///
 /// Email source priority:
@@ -60,6 +61,7 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
     public string ActorType => "user";
     public bool IsSuperAdmin => _resolved.Value.IsSuperAdmin;
     public bool IsOrgAdmin => _resolved.Value.IsOrgAdmin;
+    public string RoleName => _resolved.Value.RoleName;
     public IReadOnlySet<Guid>? AccessibleFacilityIds => _resolved.Value.AccessibleFacilityIds;
 
     public bool IsAuthorizedForFacility(Guid? facilityId)
@@ -94,7 +96,13 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
             // Last resort — pre-seed scenario. Behave as a stub super-admin
             // pointing at the demo tenant so endpoints don't NPE; production
             // traffic should never hit this branch.
-            return new ResolvedUser(DemoTenantId, DemoUserId, IsSuperAdmin: true, IsOrgAdmin: false, null);
+            return new ResolvedUser(
+                DemoTenantId,
+                DemoUserId,
+                StandardRoleNames.SuperAdmin,
+                IsSuperAdmin: true,
+                IsOrgAdmin: false,
+                null);
         }
 
         if (user.IsSuperAdmin)
@@ -107,7 +115,13 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
             // tenant split is the platform tenant — empty of docs by
             // design, prompts the UI to surface a tenant-picker).
             var effectiveTenant = ResolveTenantOverride(user.TenantId);
-            return new ResolvedUser(effectiveTenant, user.Id, IsSuperAdmin: true, IsOrgAdmin: false, null);
+            return new ResolvedUser(
+                effectiveTenant,
+                user.Id,
+                StandardRoleNames.SuperAdmin,
+                IsSuperAdmin: true,
+                IsOrgAdmin: false,
+                null);
         }
 
         // Compute access set from role assignments. Org admin = any active
@@ -124,17 +138,34 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
         var isOrgAdmin = assignments.Any(a => a.RoleName == StandardRoleNames.OrgAdmin);
         if (isOrgAdmin)
         {
-            return new ResolvedUser(user.TenantId, user.Id, IsSuperAdmin: false, IsOrgAdmin: true, null);
+            return new ResolvedUser(
+                user.TenantId,
+                user.Id,
+                StandardRoleNames.OrgAdmin,
+                IsSuperAdmin: false,
+                IsOrgAdmin: true,
+                null);
         }
 
         var facilityIds = assignments
-            .Where(a => a.RoleName == StandardRoleNames.FacilityUser && a.FacilityId.HasValue)
+            .Where(a =>
+                (a.RoleName == StandardRoleNames.FacilityAdmin || a.RoleName == StandardRoleNames.FacilityUser)
+                && a.FacilityId.HasValue)
             .Select(a => a.FacilityId!.Value)
             .ToHashSet();
+        var roleName = assignments.Any(a => a.RoleName == StandardRoleNames.FacilityAdmin)
+            ? StandardRoleNames.FacilityAdmin
+            : StandardRoleNames.FacilityUser;
 
         // No assignments = no access. Return an empty set, not null — null
         // means "unrestricted" for org/super admins.
-        return new ResolvedUser(user.TenantId, user.Id, IsSuperAdmin: false, IsOrgAdmin: false, facilityIds);
+        return new ResolvedUser(
+            user.TenantId,
+            user.Id,
+            roleName,
+            IsSuperAdmin: false,
+            IsOrgAdmin: false,
+            facilityIds);
     }
 
     /// <summary>
@@ -208,6 +239,7 @@ public sealed class RequestScopedCurrentUserContext : ICurrentUserContext
     private sealed record ResolvedUser(
         Guid TenantId,
         Guid UserId,
+        string RoleName,
         bool IsSuperAdmin,
         bool IsOrgAdmin,
         IReadOnlySet<Guid>? AccessibleFacilityIds);

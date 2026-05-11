@@ -47,8 +47,21 @@ PracticeX **does not** auto-apply migrations at startup (ADR 0005). Apply the SQ
 
 1. `migrations/practicex_initial_enterprise_foundation.sql` — canonical schemas and tables.
 2. `migrations/20260425_source_discovery_extensions.sql` — Source Discovery additions (`source_objects`, `ingestion_batches`, candidate metadata, etc.).
+3. `migrations/20260426_manifest_phase_extensions.sql`
+4. `migrations/20260427_complexity_profiling.sql`
+5. `migrations/20260427_doc_intel_layout.sql`
+6. `migrations/20260428_extracted_fields.sql`
+7. `migrations/20260429_extracted_full_text.sql`
+8. `migrations/20260429_llm_extracted_fields.sql`
+9. `migrations/20260430_llm_narrative_brief.sql`
+10. `migrations/20260430_portfolio_brief.sql`
+11. `migrations/20260509_legal_memo.sql`
+12. `migrations/20260509_portfolio_brief_per_facility.sql`
+13. `migrations/20260509_rbac_phase1.sql`
+14. `migrations/20260510_tenant_split.sql`
+15. `migrations/20260510_rbac_identity_alignment.sql`
 
-Both scripts are idempotent and safe to re-run. Example:
+All scripts are idempotent and safe to re-run. Example:
 
 ```bash
 psql "postgres://postgres:postgres@localhost:5432/practicex" \

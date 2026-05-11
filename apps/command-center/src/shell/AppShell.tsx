@@ -293,10 +293,12 @@ export function AppShell() {
                   background:
                     user.role === 'super_admin' ? 'rgba(212,99,30,0.15)'
                     : user.role === 'org_admin' ? 'rgba(29,111,66,0.15)'
+                    : user.role === 'facility_admin' ? 'rgba(32,95,173,0.15)'
                     : 'rgba(0,0,0,0.06)',
                   color:
                     user.role === 'super_admin' ? 'var(--px-orange, #d4631e)'
                     : user.role === 'org_admin' ? 'var(--px-green, #1d6f42)'
+                    : user.role === 'facility_admin' ? '#205fad'
                     : 'var(--px-ink, #555)',
                   fontWeight: 600,
                   letterSpacing: 0.4,
@@ -308,14 +310,17 @@ export function AppShell() {
                     ? 'Super Admin · access to all organizations + facilities'
                     : user.role === 'org_admin'
                     ? 'Org Admin · all facilities in this organization'
+                    : user.role === 'facility_admin'
+                    ? `Facility Admin · ${(user.accessibleFacilityIds ?? []).length} facility/facilities`
                     : `Facility scope · ${(user.accessibleFacilityIds ?? []).length} facility/facilities`
                 }
               >
                 {user.role === 'super_admin' ? 'Super Admin'
                   : user.role === 'org_admin' ? 'Org Admin'
+                  : user.role === 'facility_admin' ? 'Facility Admin'
                   : 'Facility'}
               </span>
-              {!user.isSuperAdmin && user.role === 'facility_user' && user.accessibleFacilityIds ? (
+              {!user.isSuperAdmin && (user.role === 'facility_user' || user.role === 'facility_admin') && user.accessibleFacilityIds ? (
                 <span className="muted" style={{ marginLeft: 8 }}>
                   scope: {user.accessibleFacilityIds.length} facility
                   {user.accessibleFacilityIds.length === 1 ? '' : 'ies'}

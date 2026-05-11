@@ -32,6 +32,13 @@ public interface ICurrentUserContext
     bool IsOrgAdmin { get; }
 
     /// <summary>
+    /// The caller's effective RBAC role token. One of
+    /// <c>super_admin</c>, <c>org_admin</c>, <c>facility_admin</c>, or
+    /// <c>facility_user</c>.
+    /// </summary>
+    string RoleName { get; }
+
+    /// <summary>
     /// Set of facility ids the user can read. <c>null</c> means
     /// "unrestricted within the tenant" (super-admin / org-admin); a set
     /// means strict facility-level scoping.
