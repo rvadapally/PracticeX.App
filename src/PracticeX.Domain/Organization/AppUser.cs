@@ -22,6 +22,6 @@ public static class StandardRoleNames
 {
     public const string SuperAdmin = "super_admin";       // bypasses all access checks
     public const string OrgAdmin = "org_admin";           // all facilities in their tenant
+    public const string FacilityAdmin = "facility_admin"; // facility-scoped admin, limited to assigned facilities
     public const string FacilityUser = "facility_user";   // only facilities listed in role_assignments
 }
-

@@ -196,9 +196,6 @@ public static class AnalysisEndpoints
         // Slice 21: surface the caller's role + accessible facility scope.
         // Frontend uses this to gate the facility selector and any
         // admin-only navigation entries.
-        var role = userContext.IsSuperAdmin
-            ? "super_admin"
-            : userContext.IsOrgAdmin ? "org_admin" : "facility_user";
         IReadOnlyList<Guid>? facilityIds = userContext.AccessibleFacilityIds is null
             ? null
             : userContext.AccessibleFacilityIds.ToList();
@@ -210,7 +207,7 @@ public static class AnalysisEndpoints
             Initials: string.IsNullOrWhiteSpace(initials) ? "??" : initials,
             TenantId: tenant?.Id ?? userContext.TenantId,
             TenantName: tenant?.Name ?? "Unknown",
-            Role: role,
+            Role: userContext.RoleName,
             IsSuperAdmin: userContext.IsSuperAdmin,
             AccessibleFacilityIds: facilityIds
         ));
@@ -1069,7 +1066,7 @@ public sealed record CurrentUserResponse(
     string Initials,
     Guid TenantId,
     string TenantName,
-    string Role,                                       // "super_admin" | "org_admin" | "facility_user"
+    string Role,                                       // "super_admin" | "org_admin" | "facility_admin" | "facility_user"
     bool IsSuperAdmin,
     IReadOnlyList<Guid>? AccessibleFacilityIds);       // null = unrestricted in tenant
 
