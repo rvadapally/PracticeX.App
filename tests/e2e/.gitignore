@@ -1,0 +1,8 @@
+# Playwright session cookie jar — contains a live session, NEVER commit
+auth-storage.json
+auth-storage-*.json
+
+# Test artifacts — captured per run, large
+test-results/
+playwright-report/
+playwright/.cache/
