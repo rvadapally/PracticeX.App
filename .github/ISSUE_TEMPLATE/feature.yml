@@ -1,0 +1,45 @@
+name: Feature or Fix (for Claude or Codex)
+description: A unit of work — the implementer reads "Acceptance criteria"; the verifier reads "Staging verification."
+title: "[feature] "
+labels: []
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What's the change?
+      description: One paragraph — feature, bug, refactor.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria (for the implementer agent)
+      description: Bullet list of what must be true when the PR is opened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: staging_verify
+    attributes:
+      label: Staging verification (for the verifier agent)
+      description: |
+        How will the verifier prove this works in your staging environment?
+        (Phase 1 note: verifier is stubbed for this repo — Phase 2 implements it.)
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope / follow-ups
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: routing
+    attributes:
+      label: Routing
+      options:
+        - label: Codex should handle this (add `codex-ready` label after submit)
+          required: false

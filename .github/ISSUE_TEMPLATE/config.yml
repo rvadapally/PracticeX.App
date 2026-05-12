@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Operator runbook
+    url: https://github.com/rvadapally-synexar/PracticeX.App/blob/main/AGENTS.md
+    about: Repo conventions, build instructions, agent rules

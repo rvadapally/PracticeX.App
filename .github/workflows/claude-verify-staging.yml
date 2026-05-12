@@ -1,0 +1,124 @@
+name: Claude — Verify in Staging (stub)
+
+# Phase 1 placeholder. The full verifier logic depends on how PracticeX
+# deploys (TBD inventory), so for now this workflow only handles:
+#   - listing claude-in-review issues with merged PRs
+#   - the stale_check job (nudge at 72h, escalate at 168h)
+#
+# Once the deploy path is inventoried in Phase 2, add a `verify` matrix job
+# mirroring the synexar-ios / synexar-pulse-platform shape.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: claude-verify-practicex-app
+  cancel-in-progress: false
+
+jobs:
+  list_candidates:
+    name: List issues to verify (no-op for now)
+    runs-on: ubuntu-latest
+    outputs:
+      to_verify: ${{ steps.find.outputs.to_verify }}
+      has_any: ${{ steps.find.outputs.has_any }}
+    steps:
+      - name: Find in-review issues with merged PRs
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          issues=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+              --state open --label claude-in-review \
+              --json number,createdAt,updatedAt,body \
+              --jq '[.[] | select(.body)]')
+          to_verify='[]'
+          for n in $(echo "$issues" | jq -r '.[].number'); do
+              stale=$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" \
+                  --json labels --jq '[.labels[].name] | index("claude-stale")')
+              [ "$stale" != "null" ] && continue
+              merged_pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --state merged \
+                  --search "#$n in:body" --json number \
+                  --jq 'first | .number // empty')
+              [ -z "$merged_pr" ] && continue
+              to_verify=$(echo "$to_verify" | jq --argjson n "$n" --argjson p "$merged_pr" '. + [{"issue": $n, "pr": $p}]')
+          done
+          echo "to_verify=$(echo "$to_verify" | jq -c '.')" >> "$GITHUB_OUTPUT"
+          if [ "$(echo "$to_verify" | jq 'length')" -gt 0 ]; then
+              echo "has_any=true" >> "$GITHUB_OUTPUT"
+          else
+              echo "has_any=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Placeholder verify job — when an in-review issue's PR merges, post a
+  # comment on the issue noting that verification is not yet wired up for
+  # this repo. Phase 2 replaces this with a real verifier.
+  notify_stub:
+    name: Notify (Phase 2 will implement)
+    needs: list_candidates
+    if: needs.list_candidates.outputs.has_any == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.list_candidates.outputs.to_verify) }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Note that verifier is stubbed for this repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Only post once: check for any existing `## 🔍 Claude verifier — stubbed` comment.
+          prior=$(gh issue view ${{ matrix.target.issue }} --repo "$GITHUB_REPOSITORY" \
+              --json comments --jq '[.comments[] | select(.body | startswith("## 🔍 Claude verifier — stubbed"))] | length')
+          [ "$prior" -gt 0 ] && exit 0
+          gh issue comment ${{ matrix.target.issue }} --repo "$GITHUB_REPOSITORY" --body "$(cat <<'EOF'
+          ## 🔍 Claude verifier — stubbed for this repo
+
+          PR #${{ matrix.target.pr }} is merged. The staging-verifier loop isn't yet implemented for this repo (Phase 2 — see synexar-pulse-platform's `claude-verify-staging.yml` for the template). Flip the label to `claude-shipped` manually once you've confirmed in your environment.
+          EOF
+          )"
+
+  stale_check:
+    name: Nudge / escalate stale in-review issues
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Find stale candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          now_epoch=$(date -u +%s)
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --label claude-in-review --limit 100 \
+              --json number,updatedAt,labels,user \
+              --jq '.[] | "\(.number) \(.updatedAt) \(.user.login) \([.labels[].name] | join(\",\"))"' \
+          | while read -r num updated author labels; do
+              echo "$labels" | grep -q claude-stale && continue
+              age=$(( now_epoch - $(date -u -d "$updated" +%s 2>/dev/null) ))
+              hours=$(( age / 3600 ))
+              if [ "$hours" -ge 168 ]; then
+                  gh issue edit "$num" --repo "$GITHUB_REPOSITORY" --add-label claude-stale
+                  gh issue comment "$num" --repo "$GITHUB_REPOSITORY" --body "$(cat <<EOFCOMMENT
+          ## ⚠️ Claude — issue stale (>168h)
+
+          No staging progression in 168 hours. Tagged \`claude-stale\` and pausing the verifier loop.
+          EOFCOMMENT
+          )"
+              elif [ "$hours" -ge 72 ]; then
+                  prior=$(gh issue view "$num" --repo "$GITHUB_REPOSITORY" --json comments --jq '[.comments[] | select(.body | startswith("## 🕰️"))] | length')
+                  [ "$prior" -gt 0 ] && continue
+                  gh issue comment "$num" --repo "$GITHUB_REPOSITORY" --body "$(cat <<EOFNUDGE
+          ## 🕰️ Claude verifier — slow progression
+
+          This PR hasn't progressed to staging in 72h. @${author} — does it need a review or merge? Escalating to \`claude-stale\` in 96h.
+          EOFNUDGE
+          )"
+              fi
+          done

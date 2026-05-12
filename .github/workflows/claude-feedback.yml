@@ -1,0 +1,95 @@
+name: Claude — Issue Feedback
+
+# Listens for human comments on issues that Claude has touched. Re-spawns the
+# implementer agent with the original issue context plus the new comment.
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: claude-feedback-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  reply:
+    name: Reply to feedback
+    if: >-
+      github.event.issue.state == 'open'
+      && github.event.comment.user.type == 'User'
+      && !startsWith(github.event.comment.body, '## 🤖')
+      && !startsWith(github.event.comment.body, '## ✅')
+      && !startsWith(github.event.comment.body, '## ⏳')
+      && !startsWith(github.event.comment.body, '## ⚠️')
+      && !startsWith(github.event.comment.body, '## 🔍')
+      && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      && (
+        contains(github.event.issue.labels.*.name, 'claude-working')
+        || contains(github.event.issue.labels.*.name, 'claude-in-review')
+        || contains(github.event.issue.labels.*.name, 'claude-deploying')
+        || contains(github.event.issue.labels.*.name, 'claude-shipped')
+        || contains(github.event.issue.labels.*.name, 'claude-blocked')
+      )
+
+    runs-on: [self-hosted, macOS, synexar-dev-mac]
+
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find existing branch (if any) for this issue
+        id: branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --json number,headRefName,body --jq \
+            "[.[] | select(.body | test(\"#${{ github.event.issue.number }}\"; \"i\"))]")
+          if [ "$(echo "$prs" | jq 'length')" -gt 0 ]; then
+              echo "branch=$(echo "$prs" | jq -r '.[0].headRefName')" >> "$GITHUB_OUTPUT"
+              echo "pr_number=$(echo "$prs" | jq -r '.[0].number')" >> "$GITHUB_OUTPUT"
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Claude Code agent (feedback mode)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --model claude-opus-4-7
+            --allowedTools Bash,Read,Edit,Write,Grep,Glob,Skill,WebFetch
+          prompt: |
+            You are replying to feedback on GitHub issue
+            #${{ github.event.issue.number }} in ${{ github.repository }}.
+
+            ## Original issue
+            Title: ${{ github.event.issue.title }}
+            Body:
+            ${{ github.event.issue.body }}
+
+            ## New feedback comment (from ${{ github.event.comment.user.login }})
+            ${{ github.event.comment.body }}
+
+            ## State
+            ${{ steps.branch.outputs.exists == 'true'
+                && format('A linked PR exists: #{0} on branch `{1}`. Push commits if the feedback asks for code changes.', steps.branch.outputs.pr_number, steps.branch.outputs.branch)
+                || 'No linked PR yet. Inspect labels to decide whether to wait, branch, or just reply.' }}
+
+            ## What to do
+            1. Decide if the comment asks for code changes / clarification / approach change.
+            2. Take the smallest correct action.
+            3. Append reply under `### Reply to {{commenter}}` in the existing
+               tracker comment via `gh api PATCH`, OR post a new comment
+               starting with `## 🔍 Claude reply`.
+            4. Reserved prefixes (DO NOT USE):
+               `## 🤖` / `## ✅` / `## ⏳` / `## ⚠️`

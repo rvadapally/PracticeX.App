@@ -96,7 +96,7 @@ jobs:
                  `CLAUDE.md` first to understand the repo conventions.
               2. Run repo-appropriate build + tests before opening a PR.
               3. **Capture visual proof of the feature** — required for
-                 `claude-shipped`:
+                 `claude-in-review`:
                    - For UI changes: take a short screen recording (preferred)
                      or screenshots. Commit to `docs/shipped/<issue>/` and
                      embed in the PR body and tracker comment.
@@ -164,20 +164,23 @@ jobs:
 
             await github.rest.issues.addLabels({
               owner: o, repo: r, issue_number: n,
-              labels: [success ? 'claude-shipped' : 'claude-blocked']
+              labels: [success ? 'claude-in-review' : 'claude-blocked']
             }).catch(() => {})
 
             const final = success ? [
-              '## ✅ Claude shipped this',
+              '## ⏳ Claude opened a PR — waiting on merge + staging',
               '',
               '- [x] Claim issue',
               '- [x] Implement (`/synexar-task`)',
               '- [x] Build + tests',
               '- [x] Open pull request',
+              '- [ ] **Verified live in staging** _(handled by `claude-verify-staging.yml`)_',
               '',
               prNumber
                 ? `**Pull request:** [#${prNumber} — ${prTitle}](${prUrl})`
                 : '_No PR link captured — check the run logs._',
+              '',
+              '_Demo media is in the PR description. The verifier workflow will flip this to `claude-shipped` once the PR is merged and verified in staging._',
               '',
               `_Run: [#${context.runId}](${runUrl})_`,
             ].join('\n') : [
