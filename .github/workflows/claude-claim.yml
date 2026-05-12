@@ -158,9 +158,11 @@ jobs:
             const prTitle = '${{ steps.pr.outputs.title }}'
             const runUrl = `${context.serverUrl}/${o}/${r}/actions/runs/${context.runId}`
 
-            await github.rest.issues.removeLabel({
-              owner: o, repo: r, issue_number: n, name: 'claude-working'
-            }).catch(() => {})
+            for (const label of ['claude-working', 'claude-blocked', 'claude-stale']) {
+              await github.rest.issues.removeLabel({
+                owner: o, repo: r, issue_number: n, name: label
+              }).catch(() => {})
+            }
 
             await github.rest.issues.addLabels({
               owner: o, repo: r, issue_number: n,
