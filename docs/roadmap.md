@@ -178,6 +178,7 @@ Document Intelligence Brief, premium-tier surface with a non-negotiable
 - Generates Qgenda-compatible monthly schedules.
 - Surfaces conflicts: "Dr. Brahmbhatt has Cone Health weekend coverage Apr 18-20 per the May 2024 agreement; this conflicts with the Eagle internal rotation."
 - This is the structural differentiator vs Amazon Quick / generic AI assistants — Quick has no scheduling primitive.
+- Standalone wedge and architecture research lives in `docs/qgenda-lite-standalone-scheduler-spec.md`.
 
 ### ⭐⭐ Cost Savings Engine
 - Cross-tenant rate benchmarking (anonymized).
